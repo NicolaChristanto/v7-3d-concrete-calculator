@@ -5,6 +5,91 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Printed Concrete - Universal Cost Calculator</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- html2canvas library for capturing DOM as image -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Diperbarui: Menambahkan impor doc, getDoc, getDocs, deleteDoc
+
+        // Firebase configuration and initialization (MANDATORY GLOBALS)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let userId = 'anonymous'; // Default to anonymous
+        let isAuthReady = false;
+
+        // Sign in anonymously if no custom token, otherwise use custom token
+        if (typeof __initial_auth_token !== 'undefined') {
+            signInWithCustomToken(auth, __initial_auth_token)
+                .then((userCredential) => {
+                    userId = userCredential.user.uid;
+                    isAuthReady = true;
+                    console.log("Signed in with custom token. User ID:", userId);
+                    window.dispatchEvent(new CustomEvent('authReady')); // Dispatch event
+                })
+                .catch((error) => {
+                    console.error("Error signing in with custom token:", error);
+                    signInAnonymously(auth).then((userCredential) => {
+                        userId = userCredential.user.uid;
+                        isAuthReady = true;
+                        console.log("Signed in anonymously due to custom token error. User ID:", userId);
+                        window.dispatchEvent(new CustomEvent('authReady')); // Dispatch event
+                    });
+                });
+        } else {
+            signInAnonymously(auth)
+                .then((userCredential) => {
+                    userId = userCredential.uid; // Akses UID dari userCredential.user
+                    isAuthReady = true;
+                    console.log("Signed in anonymously. User ID:", userId);
+                    window.dispatchEvent(new CustomEvent('authReady')); // Dispatch event
+                })
+                .catch((error) => {
+                    console.error("Error signing in anonymously:", error);
+                });
+        }
+
+        // Make db, auth, userId, isAuthReady globally accessible (or via a pattern like context)
+        // For simplicity in this single HTML file, we can attach to window for functions to use.
+        window.db = db;
+        window.auth = auth;
+        window.getUserId = () => userId;
+        window.isAuthReady = () => isAuthReady;
+        window.serverTimestamp = serverTimestamp; // Expose serverTimestamp
+        // Diperbarui: Mengekspos fungsi-fungsi modular Firestore
+        window.collection = collection;
+        window.query = query;
+        window.orderBy = orderBy;
+        window.onSnapshot = onSnapshot;
+        window.addDoc = addDoc;
+        window.doc = doc;
+        window.getDoc = getDoc;
+        window.getDocs = getDocs;
+        window.deleteDoc = deleteDoc;
+
+
+        // Add a listener for auth state changes (important for real apps)
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                userId = user.uid;
+                isAuthReady = true;
+            } else {
+                // User is signed out.
+                userId = 'anonymous';
+                isAuthReady = false;
+            }
+            console.log("Auth state changed. Current User ID:", userId);
+            // Optionally re-render or re-fetch data based on auth state
+            // If the initial setup handles data fetching on authReady, this might not be strictly needed for re-auth
+        });
+
+    </script>
     <style>
         /* Modern and Professional Styling */
         * {
@@ -220,7 +305,7 @@
             margin-bottom: 5px;
         }
         
-.price-label {
+        .price-label {
             font-size: 0.8em;
             opacity: 0.9;
         }
@@ -316,34 +401,25 @@
         }
 
         .summary-section tbody td {
-            padding: 0;
             vertical-align: middle;
+            text-align: right; /* Default to right for calculated values */
         }
         
-        .summary-section tbody td > div {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            width: 100%;
-            height: 100%;
-            padding: 12px;
-            box-sizing: border-box;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: #333333;
+        /* Specific alignment for description column */
+        .summary-section tbody td:nth-child(2) { /* Apply directly to TD */
+            text-align: left; /* Ensure description is left-aligned */
+            white-space: normal; /* Allow text wrapping */
+            overflow: visible; /* Ensure content is not hidden */
+            text-overflow: clip; /* Prevent ellipsis */
         }
-
-        .summary-section tbody td:nth-child(2) > div {
-            justify-content: flex-start;
-        }
-
-        .summary-section td.calculated[id$="_percentage"] > div {
-            justify-content: flex-end;
+        
+        /* Align percentage to right and make bold for calculated values */
+        .summary-section td.calculated[id$="_percentage"] {
             font-weight: bold;
+            text-align: right;
         }
 
-        .summary-section .total-row td > div {
+        .summary-section .total-row td { /* Apply directly to TD */
             color: #1A202C;
         }
         
@@ -417,6 +493,114 @@
             vertical-align: middle;
         }
 
+        /* Styles from rebar_calculation.html for rebar section */
+        .rebar-section {
+            background: #FFFFFF;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+            margin-bottom: 25px;
+            transition: all 0.3s ease;
+        }
+        .rebar-section .section-header {
+            background: #E63946; /* A distinct color for rebar section */
+        }
+        .rebar-section .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .rebar-section .summary-card {
+            background: linear-gradient(135deg, #FF6B6B, #E63946); /* Reddish gradient */
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(230, 57, 70, 0.3);
+        }
+        .rebar-section .summary-card h3 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            opacity: 0.9;
+        }
+        .rebar-section .summary-card .value {
+            font-size: 2.2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .rebar-section .calculation-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .rebar-section .calculation-table th {
+            background: linear-gradient(45deg, #C0392B, #E74C3C); /* Darker red for table header */
+            color: white;
+            padding: 18px 12px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .rebar-section .calculation-table td {
+            padding: 15px 12px;
+            text-align: center;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 1.05em;
+        }
+        .rebar-section .calculation-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        .rebar-section .calculation-table tr:hover {
+            background-color: #FDE8E8; /* Lighter red on hover */
+            transform: scale(1.02);
+            transition: all 0.3s ease;
+        }
+        .rebar-section .price-section {
+            background: linear-gradient(135deg, #fd7e14, #e63946);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            margin: 20px 0;
+        }
+        .rebar-section .price-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .rebar-section .price-item {
+            background: rgba(255,255,255,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .rebar-section .notes {
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+            border: 1px solid #ffeeba;
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 30px;
+        }
+        .rebar-section .notes h3 {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        .rebar-section .notes ul {
+            color: #856404;
+            margin-left: 20px;
+        }
+        .rebar-section .notes li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+
         @media print {
             body {
                 background-color: #fff;
@@ -428,7 +612,7 @@
                 box-shadow: none;
                 max-width: 100%;
             }
-            .header, .project-input, .section, .cost-per-cubic {
+            .header, .project-input, .section, .cost-per-cubic, .rebar-section {
                 box-shadow: none;
                 border-radius: 0;
                 margin-bottom: 10px;
@@ -450,22 +634,41 @@
                 font-size: 1.1em;
                 gap: 5px;
             }
-            .alert, .print-button, .use-checkbox, 
-            .input-group input:not([readonly]):not([type="checkbox"]),
-            .input-group select {
+            .rebar-section .section-header {
+                background: #E63946 !important;
+            }
+            /* Now display all inputs, checkboxes, and alerts in print mode */
+            .print-button, .export-button { /* Keep print/export buttons hidden */
+                display: none !important;
+            }
+            /* Hide the donation section for print */
+            .donation-section {
                 display: none !important;
             }
 
+            /* Remove overrides that hide/change appearance of inputs/checkboxes */
+            .input-group input:not([type="checkbox"]),
+            .input-group select,
+            .use-checkbox,
+            .alert {
+                display: block !important; /* Ensure they are visible */
+                /* Optionally reset any specific print-only styling that was hiding them */
+                background-color: initial !important;
+                border: initial !important;
+                color: initial !important;
+                box-shadow: initial !important;
+                text-align: initial !important;
+                width: initial !important;
+                max-width: initial !important;
+                padding: initial !important;
+            }
+            /* Specific adjustment for readonly inputs if needed for styling */
             .input-group input[readonly] {
-                display: block !important;
-                background-color: transparent !important;
-                border: none !important;
-                padding: 0 !important;
-                box-shadow: none !important;
-                color: #000 !important;
-                text-align: left !important;
-                width: auto !important;
-                max-width: none !important;
+                /* Can leave these to original styling or adjust if needed */
+                background-color: #f0f0f0 !important; /* Example: light grey for readonly */
+                border: 1px solid #ccc !important;
+                padding: 4px !important;
+                border-radius: 4px !important;
             }
 
             .input-group label {
@@ -477,13 +680,16 @@
             
             .calculated {
                 display: block !important;
-                background-color: transparent !important;
-                border: none !important;
-                padding: 0 !important;
-                box-shadow: none !important;
-                color: #000 !important;
+                /* Reset calculated field styling to make it visible and distinct */
+                background-color: #EBF8E8 !important;
+                color: #1A7036 !important;
+                font-weight: 600 !important;
+                padding: 8px !important;
+                border-radius: 5px !important;
+                border: 1px solid #D1D9E0 !important; /* Add border for consistency */
                 text-align: right !important;
                 width: auto !important;
+                max-width: none !important;
             }
 
             table {
@@ -496,7 +702,7 @@
                 break-inside: avoid !important;
             }
 
-            .section {
+            .section, .rebar-section {
                 page-break-inside: avoid !important;
                 page-break-before: auto !important;
                 break-inside: avoid !important;
@@ -515,20 +721,48 @@
                 color: white !important;
             }
 
-            .summary-section table th:nth-child(1) { width: 18% !important; }
-            .summary-section table td:nth-child(1) { width: 18% !important; text-align: left !important; }
+            /* Adjusted column widths for better alignment in print */
+            .summary-section table th:nth-child(1),
+            .summary-section table td:nth-child(1) { width: 18% !important; text-align: left !important; } /* Category */
 
-            .summary-section table th:nth-child(2) { width: 32% !important; }
-            .summary-section table td:nth-child(2) { width: 32% !important; text-align: left !important; white-space: normal !important; }
+            .summary-section table th:nth-child(2),
+            .summary-section table td:nth-child(2) { 
+                width: 28% !important; /* Adjusted for more space for numbers */
+                text-align: left !important; 
+                white-space: normal !important; /* Allow text wrapping */
+                overflow: visible !important; /* Ensure overflow is visible */
+                text-overflow: clip !important; /* Prevent ellipsis */
+            } /* Description */
 
-            .summary-section table th:nth-child(3) { width: 18% !important; }
-            .summary-section table td:nth-child(3) { width: 18% !important; text-align: right !important; }
+            .summary-section table th:nth-child(3),
+            .summary-section table td:nth-child(3) { 
+                width: 22% !important; /* Increased for numbers */
+                text-align: right !important; 
+            } /* Cost per m³ */
 
-            .summary-section table th:nth-child(4) { width: 18% !important; }
-            .summary-section table td:nth-child(4) { width: 18% !important; text-align: right !important; }
+            .summary-section table th:nth-child(4),
+            .summary-section table td:nth-child(4) { 
+                width: 22% !important; /* Increased for numbers */
+                text-align: right !important; 
+            } /* Total Project */
 
-            .summary-section table th:nth-child(5) { width: 14% !important; }
-            .summary-section table td:nth-child(5) { width: 14% !important; text-align: right !important; }
+            .summary-section table th:nth-child(5),
+            .summary-section table td:nth-child(5) { 
+                width: 10% !important; /* Adjusted for percentage */
+                text-align: right !important; 
+            } /* Percentage */
+
+            /* Make font size smaller for the actual cost values in print mode */
+            .summary-section tbody td:nth-child(3),
+            .summary-section tbody td:nth-child(4),
+            .summary-section tbody td:nth-child(5) {
+                font-size: 0.9em !important; /* Make numbers slightly smaller */
+            }
+            /* Hide USD currency span in print mode */
+            .usd-currency {
+                display: none !important;
+            }
+
 
             #material_qty_summary_tbody th:nth-child(1),
             #material_qty_summary_tbody td:nth-child(1) {
@@ -564,6 +798,160 @@
             }
         }
 
+        /* Styles for image export mode to mimic browser view */
+        /* These styles will be applied temporarily to the body during html2canvas capture */
+        body.export-mode .print-button,
+        body.export-mode .export-button { /* Keep print/export buttons hidden */
+            display: none !important;
+        }
+        /* Hide the donation section for export mode */
+        body.export-mode .donation-section {
+            display: none !important;
+        }
+
+        /* Ensure all interactive elements and notes are visible in export mode */
+        body.export-mode input,
+        body.export-mode select,
+        body.export-mode .use-checkbox,
+        body.export-mode .alert {
+            display: block !important;
+            background-color: initial !important; /* Revert to browser styles */
+            border: initial !important;
+            color: initial !important;
+            box-shadow: initial !important;
+            text-align: initial !important;
+            width: initial !important;
+            max-width: initial !important;
+            padding: initial !important;
+        }
+
+        /* Specific styles for elements that were hidden or overridden */
+        body.export-mode .project-name-input-group {
+            display: flex !important; /* Show the project name input group */
+        }
+        body.export-mode .print-only-project-name {
+            display: none !important; /* Hide the print-only project name */
+        }
+
+        body.export-mode .input-group input[readonly],
+        body.export-mode .calculated {
+            /* Reset these to their default browser appearance */
+            background-color: initial !important;
+            border: initial !important;
+            color: initial !important;
+            box-shadow: initial !important;
+            text-align: initial !important;
+            width: initial !important;
+            max-width: initial !important;
+            padding: initial !important;
+        }
+
+        /* Ensure text in description cells wraps in export mode */
+        body.export-mode .summary-section tbody td:nth-child(2) {
+            white-space: normal !important; /* Allow text wrapping */
+            overflow: visible !important; /* Ensure content is not hidden */
+            text-overflow: clip !important; /* Prevent ellipsis */
+        }
+
+        /* Apply print-mode width and font-size adjustments to export-mode as well */
+        body.export-mode .summary-section table th:nth-child(1),
+        body.export-mode .summary-section table td:nth-child(1) { width: 18% !important; text-align: left !important; }
+        body.export-mode .summary-section table th:nth-child(2),
+        body.export-mode .summary-section table td:nth-child(2) { 
+            width: 28% !important; 
+            text-align: left !important; 
+            white-space: normal !important; 
+            overflow: visible !important; 
+            text-overflow: clip !important; 
+        }
+        body.export-mode .summary-section table th:nth-child(3),
+        body.export-mode .summary-section table td:nth-child(3) { 
+            width: 22% !important; 
+            text-align: right !important; 
+        }
+        body.export-mode .summary-section table th:nth-child(4),
+        body.export-mode .summary-section table td:nth-child(4) { 
+            width: 22% !important; 
+            text-align: right !important; 
+        }
+        body.export-mode .summary-section table th:nth-child(5),
+        body.export-mode .summary-section table td:nth-child(5) { 
+            width: 10% !important; 
+            text-align: right !important; 
+        }
+        body.export-mode .summary-section tbody td:nth-child(3),
+        body.export-mode .summary-section tbody td:nth-child(4),
+        body.export-mode .summary-section tbody td:nth-child(5) {
+            font-size: 0.9em !important; /* Make numbers slightly smaller */
+        }
+        /* Hide USD currency span in export mode */
+        body.export-mode .usd-currency {
+            display: none !important;
+        }
+
+
+        /* Continue with existing print/export layout adjustments for consistency */
+        body.export-mode table,
+        body.export-mode table tr,
+        body.export-mode .section,
+        body.export-mode .rebar-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        body.export-mode th,
+        body.export-mode td {
+            border-color: #ccc !important;
+            padding: 8px !important;
+            vertical-align: top !important;
+            color: #000 !important;
+        }
+        body.export-mode .summary-section table th {
+            text-align: center !important;
+            background-color: #7E74D4 !important;
+            color: white !important;
+        }
+        body.export-mode #material_qty_summary_tbody th:nth-child(1),
+        body.export-mode #material_qty_summary_tbody td:nth-child(1) {
+            width: 40% !important;
+            text-align: left !important;
+        }
+        body.export-mode #material_qty_summary_tbody th:nth-child(2),
+        body.export-mode #material_qty_summary_tbody td:nth-child(2) {
+            width: 30% !important;
+            text-align: right !important;
+        }
+        body.export-mode #material_qty_summary_tbody th:nth-child(3),
+        body.export-mode #material_qty_summary_tbody td:nth-child(3) {
+            width: 30% !important;
+            text-align: right !important;
+        }
+        body.export-mode .summary-section .total-row td {
+            color: #000 !important;
+            font-weight: bold !important;
+        }
+        /* Style for history table */
+        #history_table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        #history_table th, #history_table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        #history_table th {
+            background-color: #f2f2f2;
+            color: #333;
+        }
+        #user_id_display {
+            font-weight: bold;
+            color: #0056b3;
+            margin-top: 10px;
+            font-size: 0.9em;
+            word-break: break-all; /* Allow breaking long IDs */
+        }
+
     </style>
 </head>
 <body>
@@ -571,8 +959,8 @@
         <div class="header">
             <h1>3D Printed Concrete - Universal Cost Calculator</h1>
             <div class="company-info">
-                PT. ICONIC LIVIN DEVELOPMENT<br>
-                Jl. Dewi Sri No.18, Legian, Kuta, Badung - Bali
+                Calculated Estimated & Should Include a 10-15% Margin<br>
+                
             </div>
         </div>
 
@@ -599,22 +987,26 @@
             <div class="input-grid mt-4">
                 <div class="input-group">
                     <label for="length_mm">Length (mm)</label>
-                    <input type="number" id="length_mm" value="4330" step="10" onchange="calculateAll()">
+                    <input type="number" id="length_mm" value="4330" step="10" onchange="calculateAll()" data-manual-control="true">
                 </div>
                 <div class="input-group">
                     <label for="width_mm">Width (mm)</label>
-                    <input type="number" id="width_mm" value="170" step="10" onchange="calculateAll()">
+                    <input type="number" id="width_mm" value="170" step="10" onchange="calculateAll()" data-manual-control="true">
                 </div>
                 <div class="input-group">
                     <label for="height_mm">Height (mm)</label>
-                    <input type="number" id="height_mm" value="2000" step="10" onchange="calculateAll()">
+                    <input type="number" id="height_mm" value="2000" step="10" onchange="calculateAll()" data-manual-control="true">
                 </div>
             </div>
 
             <div class="input-grid mt-4">
                 <div class="input-group">
                     <label for="total_volume">Total Volume (m³)</label>
-                    <input type="number" id="total_volume" value="1.00" readonly>
+                    <input type="number" id="total_volume" value="1.00" step="0.001" onchange="updateVolumeSource()">
+                    <div style="margin-top: 5px;">
+                        <input type="checkbox" id="calc_volume_from_lwh" checked onchange="updateVolumeSource()">
+                        <label for="calc_volume_from_lwh" style="display: inline; font-weight: normal;">Calculate volume from L, W, H</label>
+                    </div>
                 </div>
                 <div class="input-group">
                     <label for="project_duration">Project Duration (days)</label>
@@ -622,8 +1014,16 @@
                     <span class="text-xs text-gray-500" id="project_duration_hours_minutes"></span>
                 </div>
                 <div class="input-group">
-                    <label for="daily_operating_hours">Printer (Hours)</label>
-                    <input type="number" id="daily_operating_hours" value="8" step="1" min="1" max="24" onchange="calculateAll()">
+                    <label for="printer_operating_hours_per_day">Printer Hours/Day</label>
+                    <input type="number" id="printer_operating_hours_per_day" value="8" step="1" min="1" max="24" onchange="calculateAll()">
+                </div>
+                <div class="input-group">
+                    <label for="mixing_operating_hours_per_day">Mixing Hours/Day</label>
+                    <input type="number" id="mixing_operating_hours_per_day" value="8" step="1" min="1" max="24" onchange="calculateAll()">
+                </div>
+                <div class="input-group">
+                    <label for="waste_percentage">Waste Percentage (%)</label>
+                    <input type="number" class="editable" id="waste_percentage" value="5" step="1" min="0" max="100" onchange="calculateAll()">
                 </div>
             </div>
 
@@ -639,10 +1039,28 @@
             </div>
 
             <div class="alert alert-info" style="margin-top: 20px;">
-                <strong>ℹ️ Note:</strong> Total Volume (m³) is calculated from Length, Width, and Height. Project Duration is automatically calculated based on Total Volume and Daily Operating Hours **for the Printer** (assuming 0.2 m³ material takes 1 hour).
+                <strong>ℹ️ Note:</strong> Total Volume (m³) can be calculated from Length, Width, and Height, or entered manually. Project Duration is automatically calculated based on Total Volume, Daily Operating Hours **for Printer** (assuming 0.2 m³ material requires 1 hour for printing) AND **for Mixing** (assuming a 0.15 m³ batch requires 30 minutes to mix).
             </div>
         </div>
 
+        <!-- New Section: Project Image Upload -->
+        <div class="section">
+            <div class="section-header">🖼️ Project Visualization</div>
+            <div class="input-group" style="margin-bottom: 20px;">
+                <label for="project_image_upload">Upload Project Image:</label>
+                <input type="file" accept="image/*" id="project_image_upload" onchange="previewProjectImage(event)">
+                <small style="color: #666; margin-top: 5px;">Upload an image for project visualization (JPG, PNG, GIF).</small>
+            </div>
+            <div class="project-image-preview" style="text-align: center;">
+                <img id="project_preview_image" src="https://placehold.co/600x400/EAEFF5/666666?text=Project+Image" alt="Project Image Preview" style="max-width: 100%; height: auto; border-radius: 8px; margin-top: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: block;">
+            </div>
+            <div class="alert alert-info" style="margin-top: 20px;">
+                <strong>ℹ️ Note:</strong> Uploaded images will appear here. For printed reports, this image will be included.
+            </div>
+        </div>
+
+
+        <!-- Detailed Printing Geometry Section -->
         <div class="section">
             <div class="section-header">📐 Detailed Printing Geometry (for Ink Cost & Volume Reference)</div>
             <div class="input-grid">
@@ -671,22 +1089,26 @@
                     <div class="calculated" id="calculated_volume_m3">0 m³</div>
                 </div>
                 <div class="input-group">
-                    <label for="ink_extrusion_cost_per_meter">Cost per Meter Extrusion (Rp/m)</label>
+                    <label for="ink_extrusion_cost_per_meter">Cost per Meter Extrusion (IDR/m)</label>
                     <input type="number" class="editable" value="15000" step="1" onchange="calculateAll()" id="ink_extrusion_cost_per_meter">
                 </div>
                 <div class="input-group">
-                    <label>Total Ink Extrusion Cost (Rp)</label>
+                    <label>Total Ink Extrusion Cost (IDR)</label>
                     <div class="calculated" id="ink_extrusion_total_cost">Rp 0</div>
                 </div>
             </div>
             <div class="alert alert-info" style="margin-top: 20px;">
-                <strong>ℹ️ Note:</strong> The "Total Volume (m³)" above is the main input for the overall project. Geometry parameters here are used to calculate ink cost more detailed and provide an alternative volume estimate based on layer dimensions. **This Total Ink Extrusion Cost is for reference and is NOT included in the project total.**
+                <strong>ℹ️ Note:</strong> The "Total Volume (m³)" above is the main input for the overall project. Geometry parameters here are used for more detailed ink cost calculation and to provide an alternative volume estimate based on layer dimensions. **This Total Ink Extrusion Cost is for reference and NOT included in the project total.**
             </div>
         </div>
 
-        <!-- Material Batch Reference Section -->
+        <!-- Material Batch Reference Section (Now dynamic) -->
         <div class="section">
-            <div class="section-header">📚 Referensi Komposisi Material Per Batch</div>
+            <div class="section-header">📚 Material Composition Reference Per Batch</div>
+            <div class="input-group" style="margin-bottom: 20px;">
+                <label for="mix_design_select">Select Mix Design:</label>
+                <select id="mix_design_select" onchange="selectMixDesign(this.value); calculateAll();"></select>
+            </div>
             <div class="table-container">
                 <table>
                     <thead>
@@ -697,48 +1119,13 @@
                             <th>Cost (IDR)</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <tr>
-                            <td>Ink Powder</td>
-                            <td>20 Kg</td>
-                            <td>0.04</td>
-                            <td>192.000</td>
-                        </tr>
-                        <tr>
-                            <td>Portland Cement</td>
-                            <td>20 Kg</td>
-                            <td>0.03</td>
-                            <td>27.500</td>
-                        </tr>
-                        <tr>
-                            <td>River Sand</td>
-                            <td>60 Kg</td>
-                            <td>0.03</td>
-                            <td>10.500</td> <!-- Corrected: 60 Kg * 175 Rp/Kg = 10500 -->
-                        </tr>
-                        <tr>
-                            <td>Plastic/Tarpaulin</td>
-                            <td>2 Unit</td>
-                            <td>N/A</td>
-                            <td>19.200</td>
-                        </tr>
-                        <tr>
-                            <td>Water</td>
-                            <td>13 L</td>
-                            <td>0.05</td>
-                            <td>18.200</td>
-                        </tr>
-                        <tr class="total-row">
-                            <td><strong>Total per Batch</strong></td>
-                            <td></td>
-                            <td>~0.15</td>
-                            <td>267.400</td> <!-- Corrected Total: 192000 + 27500 + 10500 + 19200 + 18200 -->
-                        </tr>
+                    <tbody id="material_batch_reference_tbody">
+                        <!-- Content will be populated by JavaScript -->
                     </tbody>
                 </table>
             </div>
             <div class="alert alert-info" style="margin-top: 20px;">
-                <strong>💡 Note:</strong> This table is a fixed reference for the composition of 1 material batch. Material costs in the "Raw Materials" section are calculated based on the project volume input you provide.
+                <strong>💡 Note:</strong> This table shows the composition of the **selected** material batch. Material costs in the "Raw Materials" section are calculated based on the project volume input you provide.
             </div>
         </div>
 
@@ -777,7 +1164,7 @@
                 </div>
                 
                 <div class="alert alert-info">
-                    <strong>💡 Rental Information:</strong> Prices include operator training and basic maintenance. Purchase options include 5-year warranty and full technical support.
+                    <strong>💡 Rental Information:</strong> Prices include operator training and basic maintenance. Purchase options include a 5-year warranty and full technical support.
                 </div>
             </div>
         </div>
@@ -792,9 +1179,9 @@
                             <th>Material</th>
                             <th>Description</th>
                             <th>Qty per m³ (calculated)</th>
-                            <th>Price per Unit (Rp)</th>
+                            <th>Price per Unit (IDR)</th>
                             <th>Use</th>
-                            <th>Total Cost (Rp)</th>
+                            <th>Total Cost (IDR)</th>
                         </tr>
                     </thead>
                     <tbody id="materials_tbody">
@@ -802,15 +1189,15 @@
                             <td>Ink Powder</td>
                             <td>Cost: $600/ton (~9600 IDR/Kg)</td>
                             <td><input type="number" class="editable" data-cost-type="material-qty" value="0" step="0.01" onchange="calculateAll()" id="ink_powder_qty_per_m3" readonly> Kg/m³</td>
-                            <td><input type="number" class="editable" data-cost-type="material-price" value="9600" onchange="calculateAll()" id="ink_powder_price_per_kg"> Rp/Kg</td>
+                            <td><input type="number" class="editable" data-cost-type="material-price" value="9600" onchange="calculateAll()" id="ink_powder_price_per_kg"> IDR/Kg</td>
                             <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="ink_cost"></td>
                         </tr>
                         <tr>
                             <td>Portland Cement</td>
-                            <td>Merk Singa Merah</td>
+                            <td>Red Lion Brand</td>
                             <td><input type="number" class="editable" data-cost-type="material-qty" value="0" step="0.01" onchange="calculateAll()" id="cement_qty_per_m3" readonly> Kg/m³</td>
-                            <td><input type="number" class="editable" data-cost-type="material-price" value="1375" onchange="calculateAll()" id="cement_price_per_kg"> Rp/Kg</td>
+                            <td><input type="number" class="editable" data-cost-type="material-price" value="1375" onchange="calculateAll()" id="cement_price_per_kg"> IDR/Kg</td>
                             <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="cement_cost"></td>
                         </tr>
@@ -818,15 +1205,15 @@
                             <td>River Sand</td>
                             <td>From Karangasem</td>
                             <td><input type="number" class="editable" data-cost-type="material-qty" value="0" step="0.01" onchange="calculateAll()" id="sand_qty_per_m3" readonly> Kg/m³</td>
-                            <td><input type="number" class="editable" data-cost-type="material-price" value="175" onchange="calculateAll()" id="sand_price_per_kg"> Rp/Kg</td>
+                            <td><input type="number" class="editable" data-cost-type="material-price" value="175" onchange="calculateAll()" id="sand_price_per_kg"> IDR/Kg</td>
                             <td><input type="checkbox" class="use-checkbox" data-target-inputs=".material-sand-inputs" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="sand_cost"></td>
                         </tr>
                         <tr>
                             <td>Plastic/Tarpaulin</td>
                             <td>10% Unit/cost</td>
-                            <td><input type="number" class="editable" data-cost-type="material-qty" value="12.5" step="0.1" onchange="calculateAll()" id="plastic_qty_per_unit"> Unit/m³</td>
-                            <td><input type="number" class="editable" data-cost-type="material-price" value="9600" onchange="calculateAll()" id="plastic_price_per_unit"> Rp/Unit</td>
+                            <td><input type="number" class="editable" data-cost-type="material-qty" value="0" step="0.1" onchange="calculateAll()" id="plastic_qty_per_unit" readonly> Unit/m³</td>
+                            <td><input type="number" class="editable" data-cost-type="material-price" value="9600" onchange="calculateAll()" id="plastic_price_per_unit"> IDR/Unit</td>
                             <td><input type="checkbox" class="use-checkbox" data-target-inputs=".material-plastic-inputs" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="plastic_cost"></td>
                         </tr>
@@ -834,12 +1221,12 @@
                             <td>Water</td>
                             <td>Clean Water</td>
                             <td><input type="number" class="editable" data-cost-type="material-qty" value="0" step="0.01" onchange="calculateAll()" id="water_qty_per_m3" readonly> L/m³</td>
-                            <td><input type="number" class="editable" data-cost-type="material-price" value="1400" onchange="calculateAll()" id="water_price_per_l"> Rp/L</td>
+                            <td><input type="number" class="editable" data-cost-type="material-price" value="1400" onchange="calculateAll()" id="water_price_per_l"> IDR/L</td>
                             <td><input type="checkbox" class="use-checkbox" data-target-inputs=".material-water-inputs" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="water_cost"></td>
                         </tr>
                         <tr class="total-row">
-                            <td colspan="5"><strong>Total Materials per m³</strong></td>
+                            <td colspan="5"><strong>Total Raw Materials per m³</strong></td>
                             <td class="calculated" id="materials_total"></td>
                         </tr>
                     </tbody>
@@ -849,82 +1236,91 @@
         </div>
 
         <div class="section">
-            <div class="section-header">🔧 Sub Materials - Reinforcing Bar</div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Diameter</th>
-                            <th>Description</th>
-                            <th>Total Length (m)</th>
-                            <th>Unit</th>
-                            <th>Price per Meter (Rp)</th>
-                            <th>Use</th>
-                            <th>Total Cost (Rp)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="rebar_tbody">
-                        <tr>
-                            <td>D 6mm</td>
-                            <td>Reinforcing bar</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-length" value="12" step="0.1" onchange="calculateAll()" id="d6_length"></td>
-                            <td>Meter</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="5000" onchange="calculateAll()" id="d6_price"></td>
-                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="d6_cost"></td>
-                        </tr>
-                        <tr>
-                            <td>D 8mm</td>
-                            <td>Reinforcing bar</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-length" value="12" step="0.1" onchange="calculateAll()" id="d8_length"></td>
-                            <td>Meter</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="5000" onchange="calculateAll()" id="d8_price"></td>
-                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="d8_cost"></td>
-                        </tr>
-                        <tr>
-                            <td>D 10mm</td>
-                            <td>Reinforcing bar</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-length" value="12" step="0.1" onchange="calculateAll()" id="d10_length"></td>
-                            <td>Meter</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="6500" onchange="calculateAll()" id="d10_price"></td>
-                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="d10_cost"></td>
-                        </tr>
-                        <tr>
-                            <td>D 12mm</td>
-                            <td>Reinforcing bar</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-length" value="12" step="0.1" onchange="calculateAll()" id="d12_length"></td>
-                            <td>Meter</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="12700" onchange="calculateAll()" id="d12_price"></td>
-                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="d12_cost"></td>
-                        </tr>
-                        <tr>
-                            <td>D 16mm</td>
-                            <td>Reinforcing bar</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-length" value="12" step="0.1" onchange="calculateAll()" id="d16_length"></td>
-                            <td>Meter</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="12400" onchange="calculateAll()" id="d16_price"></td>
-                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="d16_cost"></td>
-                        </tr>
-                        <tr>
-                            <td>D 22mm</td>
-                            <td>Reinforcing bar</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-length" value="12" step="0.1" onchange="calculateAll()" id="d22_length"></td>
-                            <td>Meter</td>
-                            <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="15000" onchange="calculateAll()" id="d22_price"></td>
-                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="d22_cost"></td>
-                        </tr>
-                        <tr class="total-row">
-                            <td colspan="6"><strong>Total Reinforcement Cost</strong></td>
-                            <td class="calculated" id="rebar_total"></td>
-                        </tr>
-                    </tbody>
-                </table>
-                <button type="button" class="btn add-item-button" onclick="addRebarRow()">+ Add Rebar Type</button>
+            <div class="section-header">🔧 Sub Materials - Rebar (Integrated Calculation)</div>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="rebar_length_mm">Segment Length (L) (mm)</label>
+                    <input type="number" id="rebar_length_mm" placeholder="Example: 8240" value="8240" onchange="calculateAll()">
+                </div>
+                <div class="input-group">
+                    <label for="rebar_width_mm">Segment Width (W) (mm)</label>
+                    <input type="number" id="rebar_width_mm" placeholder="Example: 1440" value="1440" onchange="calculateAll()">
+                </div>
+                <div class="input-group">
+                    <label for="rebar_height_mm">Segment Height (H) (mm)</label>
+                    <input type="number" id="rebar_height_mm" placeholder="Example: 170" value="170" onchange="calculateAll()">
+                </div>
+                <div class="input-group">
+                    <label for="rebar_segments">Number of Segments (units)</label>
+                    <input type="number" id="rebar_segments" placeholder="Example: 6" value="6" min="1" onchange="calculateAll()">
+                </div>
+                <div class="input-group">
+                    <label for="rebar_price_per_kg">Rebar Price (IDR/kg)</label>
+                    <input type="number" id="rebar_price_per_kg" placeholder="Example: 18000" value="18000" onchange="calculateAll()">
+                </div>
+            </div>
+            
+            <button class="btn" style="margin-top: 20px;" onclick="calculateAll()">
+                🧮 Calculate Rebar Needs for Segments
+            </button>
+
+            <div class="rebar-section-results">
+                <div class="summary-cards" id="rebarSummaryCards">
+                    <div class="summary-card">
+                        <h3>Total Rebar Weight</h3>
+                        <div class="value" id="rebar_total_weight_display">0 kg</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Total Rebar Length</h3>
+                        <div class="value" id="rebar_total_length_display">0 m</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Total Rebar Cost</h3>
+                        <div class="value" id="rebar_total_cost_display">Rp 0</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Total Bars (12m)</h3>
+                        <div class="value" id="rebar_total_bars_display">0 bars</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin-top: 20px; color: #2c3e50;">📊 Rebar Calculation Details per Type</h4>
+                <div class="table-container">
+                    <table class="calculation-table">
+                        <thead>
+                            <tr>
+                                <th>Joint Type</th>
+                                <th>Total Length (m)</th>
+                                <th>Diameter</th>
+                                <th>Number of Rows</th>
+                                <th>Overall Length (m)</th>
+                                <th>Weight (kg)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rebarDetailTableBody">
+                            <!-- Data will be filled by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <h4 style="margin-top: 20px; color: #2c3e50;">💰 Cost Breakdown per Rebar Diameter</h4>
+                <div class="price-section">
+                    <div class="price-grid" id="rebarPriceGrid">
+                        <!-- Price details will be filled by JavaScript -->
+                    </div>
+                </div>
+                
+                <div class="alert alert-info" style="margin-top: 20px;">
+                    <strong>💡 Rebar Calculation Notes:</strong>
+                    <ul>
+                        <li>Calculation is based on the **specific segment dimensions and number of segments** you input in this section, for on-site assembly.</li>
+                        <li>This calculation **does NOT automatically scale with the overall "Total Volume (m³)"** of your project. If you manually adjust the project's "Total Volume" and need the rebar cost to reflect that scale, you must manually adjust the "Number of Segments" or other dimensions in this section.</li>
+                        <li>Rebar is primarily for **segment joints** and tie structures.</li>
+                        <li>Add **10% tolerance** for field adjustments.</li>
+                        <li>Prepare **grooves/channels** on segments for rebar placement.</li>
+                        <li>Ensure proper alignment before final grouting.</li>
+                    </ul>
+                </div>
             </div>
         </div>
 
@@ -935,11 +1331,11 @@
                     <thead>
                         <tr>
                             <th>Equipment Description</th>
-                            <th>Duration (Units)</th>
+                            <th>Duration (Unit)</th>
                             <th>Unit Type</th>
-                            <th>Rate per Unit (Rp)</th>
+                            <th>Rate per Unit (IDR)</th>
                             <th>Use</th>
-                            <th>Total Cost (Rp)</th>
+                            <th>Total Cost (IDR)</th>
                         </tr>
                     </thead>
                     <tbody id="equipment_tbody">
@@ -956,11 +1352,11 @@
                         </tr>
                         <tr>
                             <td>Truck Crane</td>
-                            <td><input type="number" class="editable" data-cost-type="equipment-qty" value="8" onchange="calculateAll()" id="crane_qty"></td>
+                            <td><input type="number" class="editable" data-cost-type="equipment-qty" value="8" onchange="calculateAll()" id="truck_crane_qty"></td>
                             <td>Hours</td>
-                            <td><input type="number" class="editable" data-cost-type="equipment-rate" value="500000" onchange="calculateAll()" id="crane_rate"></td>
+                            <td><input type="number" class="editable" data-cost-type="equipment-rate" value="500000" onchange="calculateAll()" id="truck_crane_rate"></td>
                             <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="crane_cost"></td>
+                            <td class="calculated" id="truck_crane_cost"></td>
                         </tr>
                         <tr>
                             <td>Truck</td>
@@ -971,12 +1367,12 @@
                             <td class="calculated" id="truck_rental_cost"></td>
                         </tr>
                         <tr>
-                            <td>Forklif</td>
-                            <td><input type="number" class="editable" data-cost-type="equipment-qty" value="8" onchange="calculateAll()" id="truck_rental_qty"></td>
+                            <td>Forklift</td>
+                            <td><input type="number" class="editable" data-cost-type="equipment-qty" value="8" onchange="calculateAll()" id="forklift_qty"></td>
                             <td>Hours</td>
-                            <td><input type="number" class="editable" data-cost-type="equipment-rate" value="275000" onchange="calculateAll()" id="truck_rental_rate"></td>
+                            <td><input type="number" class="editable" data-cost-type="equipment-rate" value="275000" onchange="calculateAll()" id="forklift_rate"></td>
                             <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                            <td class="calculated" id="truck_rental_cost"></td>
+                            <td class="calculated" id="forklift_cost"></td>
                         </tr>
                         <tr>
                             <td>Pickup</td>
@@ -987,10 +1383,10 @@
                             <td class="calculated" id="pickup_rental_cost"></td>
                         </tr>
                         <tr class="subheader-row">
-                            <td colspan="6" style="background-color: #F0F4FA; font-weight: bold; text-align: center;">Tools</td>
+                            <td colspan="6" style="background-color: #F0F4FA; font-weight: bold; text-align: center;">Equipment</td>
                         </tr>
                         <tr>
-                            <td>Concrete Mixer Rental (manual casting)</td>
+                            <td>Concrete Mixer Rental (manual pour)</td>
                             <td><input type="number" class="editable" data-cost-type="equipment-qty" value="24" onchange="calculateAll()" id="mixer_qty"></td>
                             <td>Hours</td>
                             <td><input type="number" class="editable" data-cost-type="equipment-rate" value="20833" onchange="calculateAll()" id="mixer_rate"></td>
@@ -998,7 +1394,7 @@
                             <td class="calculated" id="mixer_cost"></td>
                         </tr>
                         <tr>
-                            <td>Compressor for Equipment Rental</td>
+                            <td>Compressor Rental for Tools</td>
                             <td><input type="number" class="editable" data-cost-type="equipment-qty" value="24" onchange="calculateAll()" id="compressor_qty"></td>
                             <td>Hours</td>
                             <td><input type="number" class="editable" data-cost-type="equipment-rate" value="8333" onchange="calculateAll()" id="compressor_rate"></td>
@@ -1022,7 +1418,7 @@
                             <td class="calculated" id="drill_cost"></td>
                         </tr>
                         <tr class="subheader-row">
-                            <td colspan="6" style="background-color: #F0F4FA; font-weight: bold; text-align: center;">Other Sub-Rentals & Consumables</td>
+                            <td colspan="6" style="background-color: #F0F4FA; font-weight: bold; text-align: center;">Miscellaneous Rentals & Consumables</td>
                         </tr>
                         <tr>
                             <td>Fuel & Power Consumption</td>
@@ -1033,7 +1429,7 @@
                             <td class="calculated" id="fuel_cost"></td>
                         </tr>
                         <tr class="total-row">
-                            <td colspan="5"><strong>Subtotal Equipment</strong></td>
+                            <td colspan="5"><strong>Equipment Subtotal</strong></td>
                             <td class="calculated" id="equipment_total"></td>
                         </tr>
                     </tbody>
@@ -1043,7 +1439,7 @@
         </div>
 
         <div class="section">
-            <div class="section-header">👷 Labor Cost</div>
+            <div class="section-header">👷 Labor Costs</div>
             <div class="table-container">
                 <table>
                     <thead>
@@ -1052,32 +1448,50 @@
                             <th>Description</th>
                             <th>Quantity</th>
                             <th>Time (Minutes/Day)</th>
-                            <th>Rate per Hour (Rp)</th>
+                            <th>Rate per Hour (IDR)</th>
                             <th>Use</th>
-                            <th>Total Cost (Rp)</th>
+                            <th>Total Cost (IDR)</th>
                         </tr>
                     </thead>
                     <tbody id="labor_tbody">
                         <tr>
-                            <td>Field Workers</td>
+                            <td>Field Worker</td>
                             <td>250K IDR / 8 Hours</td>
-                            <td><input type="number" class="editable" data-cost-type="labor-qty" value="2" onchange="calculateAll()" id="workers_qty"></td>
+                            <td><input type="number" class="editable" data-cost-type="labor-qty" value="2" onchange="calculateAll()" id="workers_qty" data-default-qty="2"></td>
                             <td><input type="number" class="editable" data-cost-type="labor-time" value="480" onchange="calculateAll()" id="workers_time"></td>
                             <td><input type="number" class="editable" data-cost-type="labor-rate" value="31250" onchange="calculateAll()" id="workers_rate"></td>
                             <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="workers_cost"></td>
                         </tr>
                         <tr>
-                            <td>Leader</td>
+                            <td>Supervisor</td>
                             <td>500K IDR / 8 Hours</td>
-                            <td><input type="number" class="editable" data-cost-type="labor-qty" value="1" onchange="calculateAll()" id="supervisor_qty"></td>
+                            <td><input type="number" class="editable" data-cost-type="labor-qty" value="1" onchange="calculateAll()" id="supervisor_qty" data-default-qty="1"></td>
                             <td><input type="number" class="editable" data-cost-type="labor-time" value="480" onchange="calculateAll()" id="supervisor_time"></td>
                             <td><input type="number" class="editable" data-cost-type="labor-rate" value="62500" onchange="calculateAll()" id="supervisor_rate"></td>
                             <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
                             <td class="calculated" id="supervisor_cost"></td>
                         </tr>
                         <tr>
-                            <td>Daily Workers (Load/Unload)</td>
+                            <td>Mixing Crew</td>
+                            <td>Per Batch Mixing</td>
+                            <td><input type="number" class="editable" data-cost-type="labor-qty" value="2" onchange="calculateAll()" id="mixing_crew_qty"></td>
+                            <td><input type="number" class="editable" data-cost-type="labor-time" value="480" onchange="calculateAll()" id="mixing_crew_time"></td>
+                            <td><input type="number" class="editable" data-cost-type="labor-rate" value="30000" onchange="calculateAll()" id="mixing_crew_rate"></td>
+                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
+                            <td class="calculated" id="mixing_crew_cost"></td>
+                        </tr>
+                        <tr>
+                            <td>Printer Operator</td>
+                            <td>Per Printer Operation</td>
+                            <td><input type="number" class="editable" data-cost-type="labor-qty" value="1" onchange="calculateAll()" id="printer_operator_qty"></td>
+                            <td><input type="number" class="editable" data-cost-type="labor-time" value="480" onchange="calculateAll()" id="printer_operator_time"></td>
+                            <td><input type="number" class="editable" data-cost-type="labor-rate" value="40000" onchange="calculateAll()" id="printer_operator_rate"></td>
+                            <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
+                            <td class="calculated" id="printer_operator_cost"></td>
+                        </tr>
+                        <tr>
+                            <td>Daily Worker (Load/Unload)</td>
                             <td>200K IDR / 8 Hours</td>
                             <td><input type="number" class="editable" data-cost-type="labor-qty" value="0" onchange="calculateAll()" id="daily_workers_qty"></td>
                             <td><input type="number" class="editable" data-cost-type="labor-time" value="480" onchange="calculateAll()" id="daily_workers_time"></td>
@@ -1109,8 +1523,8 @@
                         <tr>
                             <th>Category</th>
                             <th>Description</th>
-                            <th>Cost per m³ (Rp)</th>
-                            <th>Project Total (Rp)</th>
+                            <th>Cost per m³ (IDR)</th>
+                            <th>Total Project (IDR)</th>
                             <th>Percentage</th>
                         </tr>
                     </thead>
@@ -1124,7 +1538,7 @@
                         </tr>
                         <tr>
                             <td>Equipment & Rentals</td>
-                            <td>Additional equipment and tools</td>
+                            <td>Additional tools and equipment</td>
                             <td class="calculated" id="equipment_per_cubic">0</td>
                             <td class="calculated" id="equipment_project_total">0</td>
                             <td class="calculated" id="equipment_percentage">0%</td>
@@ -1144,14 +1558,14 @@
                             <td class="calculated" id="labor_percentage">0%</td>
                         </tr>
                         <tr>
-                            <td>Reinforcement</td>
-                            <td>Steel bars and accessories</td>
+                            <td>Rebar</td>
+                            <td>Steel bars and accessories for segments</td>
                             <td class="calculated" id="rebar_per_cubic">0</td>
                             <td class="calculated" id="rebar_project_total">0</td>
                             <td class="calculated" id="rebar_percentage">0%</td>
                         </tr>
                         <tr class="total-row">
-                            <td><strong>PROJECT TOTAL</strong></td>
+                            <td><strong>TOTAL PROJECT</strong></td>
                             <td><strong>Complete 3D Printed Structure</strong></td>
                             <td class="calculated" id="grand_total_per_cubic">0</td>
                             <td class="calculated" id="grand_total_project">0</td>
@@ -1162,17 +1576,67 @@
             </div>
         </div>
 
-        <button onclick="window.print()" class="btn print-button">🖨️ Cetak Laporan</button>
+        <button onclick="window.print()" class="btn print-button">🖨️ Print Report</button>
+        <button onclick="exportToImage()" class="btn export-button">🖼️ Export to Image</button>
+
+        <!-- New Section: Calculation History -->
+        <div class="section" style="margin-top: 30px;">
+            <div class="section-header">📜 Calculation History</div>
+            <p>Your User ID: <span id="user_id_display">Loading...</span></p>
+            <div class="table-container">
+                <table id="history_table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Project Name</th>
+                            <th>Total Volume (m³)</th>
+                            <th>Cost per m³ (IDR)</th>
+                            <th>Total Project Cost (IDR)</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history_tbody">
+                        <!-- History items will be loaded here by JavaScript -->
+                        <tr><td colspan="6" style="text-align: center;">Loading history...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+             <button type="button" class="btn" style="margin-top: 20px;" onclick="clearHistory()">Clear All History</button>
+        </div>
+
+        <!-- New Section: Support Us / Donation -->
+        <div class="section donation-section" style="margin-top: 30px; text-align: center;">
+            <div class="section-header">💖 Support Our Work</div>
+            <p style="margin-bottom: 20px;">If this calculator has been useful to you, please consider making a small donation to support its development and maintenance. Every contribution helps!</p>
+            
+            <!-- PayPal Donate Button Code - Replace with YOUR PayPal generated code -->
+            <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+                <input type="hidden" name="cmd" value="_donations" />
+                <input type="hidden" name="business" value="nicolchristan@gmail.com" /> <!-- Diperbarui dengan alamat email PayPal Anda -->
+                <input type="hidden" name="item_name" value="Support 3D Concrete Calculator" />
+                <input type="hidden" name="currency_code" value="USD" />
+                <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" />
+                <img alt="" border="0" src="https://www.paypal.com/en_US/i/scr/pixel.gif" width="1" height="1" />
+            </form>
+            <p style="margin-top: 15px; font-size: 0.9em; color: #666;">
+                *Pastikan Anda telah menguji tombol donasi ini untuk memastikan berfungsi dengan benar dengan akun PayPal Anda.
+                Anda dapat menghasilkan kode tombol donasi spesifik Anda langsung dari bagian "Alat > Tombol PayPal" di akun PayPal Anda jika ingin opsi atau tampilan yang berbeda.
+            </p>
+            <!-- End PayPal Donate Button Code -->
+
+        </div>
+
     </div>
 
     <script>
+        // Global flag to indicate if currently printing or exporting image
+        let isExportingOrPrinting = false;
+
         // Function to update the hidden span for printing Project Name
         function updateProjectNameForPrint() {
             const projectNameInput = document.getElementById('project_name');
             const printProjectNameSpan = document.getElementById('print_project_name');
-            if (projectNameInput && printProjectNameSpan) {
-                printProjectNameSpan.textContent = projectNameInput.value;
-            }
+            if (projectNameInput) printProjectNameSpan.textContent = projectNameInput.value;
         }
 
         // Data for available printers and their rental/purchase options
@@ -1180,33 +1644,33 @@
             {
                 name: "Win Sun",
                 options: [
-                    { label: "Hourly Rental (per hour)", rate: 148625, unit: "hour" },
+                    { label: "Hourly Rental", rate: 148625, unit: "hour" },
                     { label: "8-Hour Rental (per day)", rate: 3567000 / 3, unit: "8-hour" },
                     { label: "Daily Rental (24h)", rate: 3567000, unit: "day" },
                     { label: "Monthly Rental", rate: 108520000, unit: "month" },
-                    { label: "Yearly Rental", rate: 1302240000, unit: "year" },
+                    { label: "Annual Rental", rate: 1302240000, unit: "year" },
                     { label: "Purchase (5 Years)", rate: 6511200000, unit: "one-time" }
                 ]
             },
             {
                 name: "GearBuild",
                 options: [
-                    { label: "Hourly Rental (per hour)", rate: 64057, unit: "hour" },
+                    { label: "Hourly Rental", rate: 64057, unit: "hour" },
                     { label: "8-Hour Rental (per day)", rate: 1537367 / 3, unit: "8-hour" },
                     { label: "Daily Rental (24h)", rate: 1537367, unit: "day" }, 
                     { label: "Monthly Rental", rate: 46121000, unit: "month" },
-                    { label: "Yearly Rental", rate: 553425000, unit: "year" },
+                    { label: "Annual Rental", rate: 553425000, unit: "year" },
                     { label: "Purchase (5 Years)", rate: 2767260000, unit: "one-time" }
                 ]
             },
             {
                 name: "SJ",
                 options: [
-                    { label: "Hourly Rental (per hour)", rate: 29732, unit: "hour" },
+                    { label: "Hourly Rental", rate: 29732, unit: "hour" },
                     { label: "8-Hour Rental (per day)", rate: 713556 / 3, unit: "8-hour" },
                     { label: "Daily Rental (24h)", rate: 713556, unit: "day" },
                     { label: "Monthly Rental", rate: 21704000, unit: "month" },
-                    { label: "Yearly Rental", rate: 260448000, unit: "year" },
+                    { label: "Annual Rental", rate: 260448000, unit: "year" },
                     { label: "Purchase (5 Years)", rate: 1302240000, unit: "one-time" }
                 ]
             }
@@ -1215,26 +1679,77 @@
         let selectedPrinter = null;
         let selectedPrinterOption = null;
 
-        // Definisi komposisi material per batch dan volume batch
-        // Material composition per batch and batch volume definition
-        const MATERIAL_BATCH_COMPOSITION = {
-            ink_powder: { kg: 20, volume_m3_in_batch: 0.04 },
-            portland_cement: { kg: 20, volume_m3_in_batch: 0.03 },
-            river_sand: { kg: 60, volume_m3_in_batch: 0.03 },
-            plastic_tarpaulin: { unit: 2, volume_m3_in_batch: 0 },
-            water: { liter: 14, volume_m3_in_batch: 0.05 },
-            total_volume_per_batch_m3: 0.15
-        };
+        // Define different mix designs
+        const MIX_DESIGNS = [
+            {
+                name: "Standard Mix",
+                composition: {
+                    ink_powder: { kg: 20, volume_m3_in_batch: 0.04, cost_idr: 192000 },
+                    portland_cement: { kg: 20, volume_m3_in_batch: 0.03, cost_idr: 27500 },
+                    river_sand: { kg: 60, volume_m3_in_batch: 0.03, cost_idr: 10500 }, // 60 Kg * 175 Rp/Kg
+                    plastic_tarpaulin: { unit: 2, volume_m3_in_batch: 0, cost_idr: 19200 },
+                    water: { liter: 13, volume_m3_in_batch: 0.05, cost_idr: 18200 },
+                    total_volume_per_batch_m3: 0.15,
+                    mixing_time_per_batch_hours: 0.5 // 30 minutes to mix one batch
+                },
+                description: "Standard composition for general 3D concrete printing."
+            },
+            {
+                name: "High Strength Mix",
+                composition: {
+                    ink_powder: { kg: 25, volume_m3_in_batch: 0.045, cost_idr: 240000 },
+                    portland_cement: { kg: 30, volume_m3_in_batch: 0.04, cost_idr: 41250 },
+                    river_sand: { kg: 45, volume_m3_in_batch: 0.025, cost_idr: 7875 }, // 45 Kg * 175 Rp/Kg
+                    plastic_tarpaulin: { unit: 2, volume_m3_in_batch: 0, cost_idr: 19200 },
+                    water: { liter: 12, volume_m3_in_batch: 0.045, cost_idr: 16800 },
+                    total_volume_per_batch_m3: 0.155, // Slightly different volume
+                    mixing_time_per_batch_hours: 0.75 // Longer mixing time for high strength
+                },
+                description: "High strength mix for structural applications."
+            },
+            {
+                name: "Lightweight Mix",
+                composition: {
+                    ink_powder: { kg: 15, volume_m3_in_batch: 0.035, cost_idr: 144000 },
+                    portland_cement: { kg: 15, volume_m3_in_batch: 0.025, cost_idr: 20625 },
+                    river_sand: { kg: 30, volume_m3_in_batch: 0.015, cost_idr: 5250 }, // 30 Kg * 175 Rp/Kg
+                    lightweight_aggregate: { kg: 40, volume_m3_in_batch: 0.06, cost_idr: 50000 }, // New material example
+                    plastic_tarpaulin: { unit: 2, volume_m3_in_batch: 0, cost_idr: 19200 },
+                    water: { liter: 15, volume_m3_in_batch: 0.055, cost_idr: 21000 },
+                    total_volume_per_batch_m3: 0.19, // Larger volume for lightweight mix
+                    mixing_time_per_batch_hours: 0.6 // Slightly longer mixing
+                },
+                description: "Lightweight mix for non-structural applications."
+            }
+        ];
+
+        let selectedMixDesign = MIX_DESIGNS[0]; // Default to Standard Mix
 
 
-        // Function to format numbers to Indonesian Rupiah currency
+        // Define the exchange rate from IDR to USD
+        const EXCHANGE_RATE_IDR_TO_USD = 1 / 16000; // 1 USD = 16.000 IDR (approx.)
+
+
+        // Function to format numbers to Indonesian Rupiah currency with USD indicator
         function formatRupiah(amount) {
-            return new Intl.NumberFormat('id-ID', {
-                style: 'currency',
-                currency: 'IDR',
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0
+            // Format the Rupiah amount without currency symbol
+            const formattedIdr = new Intl.NumberFormat('id-ID', {
+                minimumFractionDigits: 0, 
+                maximumFractionDigits: 0 
             }).format(amount);
+
+            // If we are printing or exporting image, omit the USD part for cleaner layout
+            if (isExportingOrPrinting) {
+                return `Rp ${formattedIdr}`;
+            }
+            
+            // Calculate and format the USD equivalent for browser view
+            const usdAmount = amount * EXCHANGE_RATE_IDR_TO_USD; // Fixed typo here
+            // Use .toFixed(2) for USD to show two decimal places for currency
+            const formattedUsd = usdAmount.toFixed(2);
+
+            // Combine both with inline styling for USD in browser view
+            return `Rp ${formattedIdr} <span class="usd-currency">(${formattedUsd} USD)</span>`;
         }
 
         // Function to format quantities (e.g., Kg, L, Unit)
@@ -1248,6 +1763,7 @@
         // Function to render printer cards dynamically
         function renderPrinterCards() {
             const printerCardsContainer = document.getElementById('printer_cards');
+            if (!printerCardsContainer) return; // Add null check
             printerCardsContainer.innerHTML = '';
 
             PRINTERS.forEach((printer, printerIndex) => {
@@ -1279,57 +1795,150 @@
             allPrinterOptions.forEach(option => option.classList.remove('selected'));
 
             const selectedOptionElement = document.querySelector(`.pricing-option[data-printer-index="${printerIndex}"][data-option-index="${optionIndex}"]`);
-            selectedOptionElement.classList.add('selected');
+            if (selectedOptionElement) selectedOptionElement.classList.add('selected');
 
             const allPrinterCards = document.querySelectorAll('.printer-card');
             allPrinterCards.forEach(card => card.classList.remove('selected'));
-            selectedOptionElement.closest('.printer-card').classList.add('selected');
+            if (selectedOptionElement) { // Check if selectedOptionElement exists before accessing its properties
+                const closestPrinterCard = selectedOptionElement.closest('.printer-card');
+                if (closestPrinterCard) closestPrinterCard.classList.add('selected');
+            }
+
 
             selectedPrinter = PRINTERS[printerIndex];
             selectedPrinterOption = selectedPrinter.options[optionIndex];
             
-            document.getElementById('selected_printer_feedback').textContent = `Currently selected: ${selectedPrinter.name} - ${selectedPrinterOption.label}`;
-
-            calculateAll();
+            calculateAll(); // Recalculate everything including rebar cost
+            const selectedPrinterFeedback = document.getElementById('selected_printer_feedback');
+            if (selectedPrinterFeedback) selectedPrinterFeedback.textContent = `Currently selected: ${selectedPrinter.name} - ${selectedPrinterOption.label}`;
         }
+
+        // Function to render mix design options
+        function renderMixDesignOptions() {
+            const mixDesignSelect = document.getElementById('mix_design_select');
+            if (!mixDesignSelect) return; // Add null check
+            mixDesignSelect.innerHTML = ''; // Clear existing options
+
+            MIX_DESIGNS.forEach((mix, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = mix.name;
+                mixDesignSelect.appendChild(option);
+            });
+            // Select the default mix design
+            mixDesignSelect.value = 0;
+            selectMixDesign(0); // Trigger initial selection and rendering
+        }
+
+        // Function to select a mix design and update the reference table
+        function selectMixDesign(index) {
+            selectedMixDesign = MIX_DESIGNS[parseInt(index)];
+            const refTbody = document.getElementById('material_batch_reference_tbody');
+            if (!refTbody) return; // Add null check
+            refTbody.innerHTML = ''; // Clear previous content
+
+            let totalBatchCost = 0;
+            const composition = selectedMixDesign.composition;
+
+            // Helper to add rows to the reference table
+            const addRefRow = (name, qty, volume, cost) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${name}</td>
+                    <td>${qty}</td>
+                    <td>${volume === 'N/A' ? 'N/A' : volume.toFixed(2)}</td>
+                    <td>${formatRupiah(cost)}</td> <!-- Use formatRupiah here for proper display -->
+                `;
+                refTbody.appendChild(row);
+            };
+
+            for (const materialKey in composition) {
+                if (materialKey === 'total_volume_per_batch_m3' || materialKey === 'mixing_time_per_batch_hours') continue;
+
+                const material = composition[materialKey];
+                let qtyDisplay = '';
+                let volumeDisplay = material.volume_m3_in_batch;
+                let costDisplay = material.cost_idr;
+
+                if (material.kg) qtyDisplay = `${material.kg} Kg`;
+                else if (material.liter) qtyDisplay = `${material.liter} L`;
+                else if (material.unit) qtyDisplay = `${material.unit} Unit`;
+
+                // Translate material keys for display in the batch reference table
+                let translatedMaterialName;
+                switch (materialKey) {
+                    case 'ink_powder': translatedMaterialName = 'Ink Powder'; break;
+                    case 'portland_cement': translatedMaterialName = 'Portland Cement'; break;
+                    case 'river_sand': translatedMaterialName = 'River Sand'; break;
+                    case 'plastic_tarpaulin': translatedMaterialName = 'Plastic/Tarpaulin'; break;
+                    case 'water': translatedMaterialName = 'Water'; break;
+                    case 'lightweight_aggregate': translatedMaterialName = 'Lightweight Aggregate'; break;
+                    default: translatedMaterialName = materialKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); break;
+                }
+
+                addRefRow(translatedMaterialName, qtyDisplay, volumeDisplay, costDisplay);
+                totalBatchCost += material.cost_idr;
+            }
+
+            // Add total row
+            const totalRow = document.createElement('tr');
+            totalRow.className = 'total-row';
+            totalRow.innerHTML = `
+                <td><strong>Total per Batch</strong></td>
+                <td></td>
+                <td>~${selectedMixDesign.composition.total_volume_per_batch_m3.toFixed(2)}</td>
+                <td>${formatRupiah(totalBatchCost)}</td> <!-- Use formatRupiah here for proper display -->
+            `;
+            refTbody.appendChild(totalRow);
+
+            calculateAll(); // Recalculate all costs after mix design selection
+        }
+
 
         // Function to calculate the 3D printer cost
         function calculatePrinterCost() {
             let total_volume = parseFloat(document.getElementById('total_volume').value) || 0;
+            let printer_operating_hours_per_day = parseFloat(document.getElementById('printer_operating_hours_per_day').value) || 0;
             
             let printerCost = 0;
             let printerDescription = "Not Selected";
+
+            // Define a printing rate (m³ per hour) - for this calculator, assuming 0.2 m³ material printed in 1 hour
+            const printing_rate_m3_per_hour = 0.2; 
+            let total_printing_hours_needed = 0;
+
+            if (total_volume > 0 && printing_rate_m3_per_hour > 0) {
+                total_printing_hours_needed = total_volume / printing_rate_m3_per_hour;
+            }
 
             if (selectedPrinter && selectedPrinterOption) {
                 const rate = selectedPrinterOption.rate;
                 const unit = selectedPrinterOption.unit;
                 printerDescription = `${selectedPrinter.name} - ${selectedPrinterOption.label}`;
 
-                const volume_per_batch_for_hours = 0.2;
-                const time_per_batch_hours = 1;
-                let total_project_hours_needed = 0;
-                if (total_volume > 0 && volume_per_batch_for_hours > 0) {
-                    total_project_hours_needed = (total_volume / volume_per_batch_for_hours) * time_per_batch_hours;
-                }
-
-
-                if (unit === "hour") {
-                    printerCost = rate * total_project_hours_needed;
-                } else if (unit === "8-hour") {
-                    printerCost = (rate / 8) * total_project_hours_needed;
-                } else if (unit === "day") {
-                    printerCost = (rate / 24) * total_project_hours_needed;
-                } else if (unit === "month") {
-                    printerCost = (rate / (30 * 24)) * total_project_hours_needed;
-                } else if (unit === "year") {
-                    printerCost = (rate / (365 * 24)) * total_project_hours_needed;
+                if (unit === "hour") { // Hourly Rental (per hour)
+                    printerCost = rate * total_printing_hours_needed;
+                } else if (unit === "8-hour") { // 8-Hour Rental (per day)
+                    // Calculate days needed based on 8-hour shifts
+                    const printing_days_needed_8hr_shift = total_printing_hours_needed / 8;
+                    printerCost = rate * printing_days_needed_8hr_shift;
+                } else if (unit === "day") { // Daily Rental (24h)
+                    const printing_days_needed_24hr_shift = total_printing_hours_needed / 24;
+                    printerCost = rate * printing_days_needed_24hr_shift;
+                } else if (unit === "month") { // Monthly Rental
+                    const printing_months_needed = total_printing_hours_needed / (30 * 24); // Assuming 30 days, 24 hours/day for monthly calculation basis
+                    printerCost = rate * printing_months_needed;
+                } else if (unit === "year") { // Yearly Rental
+                    const printing_years_needed = total_printing_hours_needed / (365 * 24); // Assuming 365 days, 24 hours/day for yearly calculation basis
+                    printerCost = rate * printing_years_needed;
                 } else if (unit === "one-time") {
-                    printerCost = rate;
+                    printerCost = rate; // Fixed purchase cost
                 }
             }
 
-            document.getElementById('selected_printer_summary').textContent = printerDescription;
-            return printerCost;
+            const selectedPrinterSummary = document.getElementById('selected_printer_summary');
+            if (selectedPrinterSummary) selectedPrinterSummary.textContent = printerDescription;
+            return { cost: printerCost, total_printing_hours_needed: total_printing_hours_needed };
         }
 
         // Function to calculate additional equipment and rentals cost
@@ -1351,16 +1960,17 @@
                     const rowTotal = quantity * rate;
                     
                     if (calculatedCell) {
-                        calculatedCell.textContent = formatRupiah(rowTotal);
+                        calculatedCell.innerHTML = formatRupiah(rowTotal); // Changed to innerHTML
                     }
                     totalCost += rowTotal;
                 } else {
                     if (calculatedCell) {
-                        calculatedCell.textContent = formatRupiah(0);
+                        calculatedCell.innerHTML = formatRupiah(0); // Changed to innerHTML
                     }
                 }
             });
-            document.getElementById('equipment_total').textContent = formatRupiah(totalCost);
+            const equipmentTotal = document.getElementById('equipment_total');
+            if (equipmentTotal) equipmentTotal.innerHTML = formatRupiah(totalCost); // Changed to innerHTML
             return totalCost;
         }
 
@@ -1372,84 +1982,142 @@
             const layer_amount = parseFloat(document.getElementById('layer_amount').value) || 0;
 
             const total_extrusion_length_m = (contour_length_per_layer_mm * layer_amount) / 1000;
-            document.getElementById('total_extrusion_length_m').textContent = `${total_extrusion_length_m.toFixed(2)} m`;
+            const totalExtrusionLengthM = document.getElementById('total_extrusion_length_m');
+            if (totalExtrusionLengthM) totalExtrusionLengthM.textContent = `${total_extrusion_length_m.toFixed(2)} m`;
 
             const volume_per_meter_extrusion_m3 = (ink_width_mm / 1000) * (ink_thickness_mm / 1000) * 1;
             const calculated_volume_m3 = volume_per_meter_extrusion_m3 * total_extrusion_length_m;
-            document.getElementById('calculated_volume_m3').textContent = `${calculated_volume_m3.toFixed(4)} m³`;
+            const calculatedVolumeM3 = document.getElementById('calculated_volume_m3');
+            if (calculatedVolumeM3) calculatedVolumeM3.textContent = `${calculated_volume_m3.toFixed(4)} m³`;
+            // Updated: Changed `$m^3$` to `m³`
+
 
             const inkExtrusionPricePerMeter = parseFloat(document.getElementById('ink_extrusion_cost_per_meter').value) || 0;
             const inkExtrusionTotalCost = inkExtrusionPricePerMeter * total_extrusion_length_m;
-            document.getElementById('ink_extrusion_total_cost').textContent = formatRupiah(inkExtrusionTotalCost);
+            const inkExtrusionTotalCostElement = document.getElementById('ink_extrusion_total_cost');
+            if (inkExtrusionTotalCostElement) inkExtrusionTotalCostElement.innerHTML = formatRupiah(inkExtrusionTotalCost); // Changed to innerHTML
         }
 
         // Function to calculate raw materials cost (excluding independent ink extrusion)
         function calculateMaterials() {
             let totalCost = 0;
-            const total_volume = parseFloat(document.getElementById('total_volume').value) || 0;
+            let total_volume = parseFloat(document.getElementById('total_volume').value) || 0;
+            let waste_percentage = parseFloat(document.getElementById('waste_percentage').value) || 0;
+
+            // Adjust total volume by waste percentage
+            total_volume *= (1 + (waste_percentage / 100));
             
-            const total_volume_per_batch_m3 = MATERIAL_BATCH_COMPOSITION.total_volume_per_batch_m3;
-
-            document.getElementById('ink_powder_qty_per_m3').value = (MATERIAL_BATCH_COMPOSITION.ink_powder.kg / total_volume_per_batch_m3).toFixed(2);
-            document.getElementById('cement_qty_per_m3').value = (MATERIAL_BATCH_COMPOSITION.portland_cement.kg / total_volume_per_batch_m3).toFixed(2);
-            document.getElementById('sand_qty_per_m3').value = (MATERIAL_BATCH_COMPOSITION.river_sand.kg / total_volume_per_batch_m3).toFixed(2);
-            document.getElementById('water_qty_per_m3').value = (MATERIAL_BATCH_COMPOSITION.water.liter / total_volume_per_batch_m3).toFixed(2);
+            const composition = selectedMixDesign.composition;
+            const total_volume_per_batch_m3 = composition.total_volume_per_batch_m3;
 
 
+            // Update Qty per m³ inputs based on selected mix design composition
             const materialRows = document.querySelectorAll('#materials_tbody tr:not(.total-row)');
             const materialQtySummaryTbody = document.getElementById('material_qty_summary_tbody');
+            if (!materialQtySummaryTbody) return 0; // Add null check
             materialQtySummaryTbody.innerHTML = '';
 
             materialRows.forEach(row => {
                 const checkbox = row.querySelector('.use-checkbox');
                 const calculatedCostCell = row.querySelector('.calculated');
-                const materialName = row.querySelector('td:nth-child(1)').textContent.trim();
+                const materialNameElement = row.querySelector('td:nth-child(1)');
+                const materialName = materialNameElement ? materialNameElement.textContent.trim() : '';
                 const qtyInput = row.querySelector('input[data-cost-type="material-qty"]');
-                const unitTextElement = qtyInput ? qtyInput.nextSibling : null;
-                const unitText = unitTextElement ? unitTextElement.textContent.trim() : 'Kg/Unit';
+                const priceInput = row.querySelector('input[data-cost-type="material-price"]');
+                
+                let unitText = '';
+                if (qtyInput) {
+                    // Extract unit from the original HTML text sibling of the quantity input
+                    // Diperbarui: Mencari teks yang mengandung /m³ atau unit spesifik
+                    const unitNode = Array.from(row.childNodes).find(node => node.nodeType === Node.TEXT_NODE && (node.textContent.includes('/m³') || node.textContent.includes('Unit') || node.textContent.includes('L')));
+                    if (unitNode) {
+                        unitText = unitNode.textContent.trim().split('/')[0].trim();
+                    } else if (materialName === 'Plastic/Tarpaulin') {
+                        unitText = 'Unit';
+                    } else if (materialName === 'Water') {
+                        unitText = 'L';
+                    } else {
+                        unitText = 'Kg'; // Default for other materials
+                    }
+                }
+               
 
-                if (!checkbox || checkbox.checked) {
+                // Determine material key for mix composition lookup (e.g., "Ink Powder" -> "ink_powder")
+                let materialKey = materialName.toLowerCase().replace(/ /g, '_');
+                // Special handling for 'Portland Cement' (originally 'Portland Cement')
+                if (materialName === 'Ink Powder') materialKey = 'ink_powder';
+                else if (materialName === 'Portland Cement') materialKey = 'portland_cement';
+                else if (materialName === 'River Sand') materialKey = 'river_sand';
+                else if (materialName === 'Plastic/Tarpaulin') materialKey = 'plastic_tarpaulin';
+                else if (materialName === 'Water') materialKey = 'water';
+
+
+                const materialInMix = composition[materialKey];
+                const isMaterialInMix = materialInMix !== undefined;
+
+                if (isMaterialInMix) {
+                    // Update the readonly quantity input with the value from the selected mix design
+                    let quantityValue;
+                    if (materialInMix.kg !== undefined) {
+                        quantityValue = (materialInMix.kg / total_volume_per_batch_m3);
+                    } else if (materialInMix.liter !== undefined) {
+                        quantityValue = (materialInMix.liter / total_volume_per_batch_m3);
+                    } else if (materialInMix.unit !== undefined) {
+                        quantityValue = (materialInMix.unit / total_volume_per_batch_m3);
+                    } else {
+                        quantityValue = 0; // Fallback
+                    }
+                    if (qtyInput) qtyInput.value = quantityValue.toFixed(2);
+                    
+                    // Re-enable inputs and remove disabled-row class if it's part of the mix
+                    row.classList.remove('disabled-row');
+                    if (qtyInput) qtyInput.removeAttribute('disabled');
+                    if (priceInput) priceInput.removeAttribute('disabled');
+                    if (checkbox) checkbox.removeAttribute('disabled'); // Ensure checkbox is enabled
+                } else {
+                    // If material is not in the current mix design, disable inputs and set qty to 0
+                    if (qtyInput) qtyInput.value = 0;
+                    row.classList.add('disabled-row');
+                    if (qtyInput) qtyInput.setAttribute('disabled', 'true');
+                    if (priceInput) priceInput.setAttribute('disabled', 'true');
+                    if (checkbox) {
+                        checkbox.checked = false; // Uncheck it automatically if not in mix
+                        checkbox.setAttribute('disabled', 'true'); // Disable checkbox
+                    }
+                }
+
+                // Now calculate cost based on checkbox state and whether it's enabled (from mix or manual enable)
+                if ((!checkbox || checkbox.checked) && !row.classList.contains('disabled-row')) { 
                     const quantityPerM3 = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
-                    const priceInput = row.querySelector('input[data-cost-type="material-price"]');
                     const price = parseFloat(priceInput ? priceInput.value : 0) || 0;
                     
                     const rowCostTotal = quantityPerM3 * price * total_volume; 
                     
                     if (calculatedCostCell) {
-                        calculatedCostCell.textContent = formatRupiah(rowCostTotal);
+                        calculatedCostCell.innerHTML = formatRupiah(rowCostTotal);
                     }
                     totalCost += rowCostTotal;
 
-                    if (materialName !== 'Plastic/Tarpaulin') {
-                        const totalQuantity = quantityPerM3 * total_volume;
-                        const newQtySummaryRow = document.createElement('tr');
-                        newQtySummaryRow.innerHTML = `
-                            <td>${materialName}</td>
-                            <td>${formatQuantity(quantityPerM3, unitText.split('/')[0].trim())}</td>
-                            <td>${formatQuantity(totalQuantity, unitText.split('/')[0].trim())}</td>
-                        `;
-                        materialQtySummaryTbody.appendChild(newQtySummaryRow);
-                    } else {
-                        const totalQuantity = quantityPerM3 * total_volume;
-                        const newQtySummaryRow = document.createElement('tr');
-                        newQtySummaryRow.innerHTML = `
-                            <td>${materialName}</td>
-                            <td>${formatQuantity(quantityPerM3, unitText.split('/')[0].trim())}</td>
-                            <td>${formatQuantity(totalQuantity, unitText.split('/')[0].trim())}</td>
-                        `;
-                        materialQtySummaryTbody.appendChild(newQtySummaryRow);
-                    }
-
-                } else {
-                    if (calculatedCostCell) {
-                        calculatedCostCell.textContent = formatRupiah(0);
-                    }
+                    // Update Material Quantity Summary
+                    const totalQuantity = quantityPerM3 * total_volume;
                     const newQtySummaryRow = document.createElement('tr');
-                    newQtySummaryRow.classList.add('disabled-row');
                     newQtySummaryRow.innerHTML = `
                         <td>${materialName}</td>
-                        <td>${formatQuantity(0, unitText.split('/')[0].trim())}</td>
-                        <td>${formatQuantity(0, unitText.split('/')[0].trim())}</td>
+                        <td>${formatQuantity(quantityPerM3, unitText)}</td>
+                        <td>${formatQuantity(totalQuantity, unitText)}</td>
+                    `;
+                    materialQtySummaryTbody.appendChild(newQtySummaryRow);
+                } else {
+                    // If unchecked or disabled by mix, set cost to 0 and add to summary as 0 quantity
+                    if (calculatedCostCell) {
+                        calculatedCostCell.innerHTML = formatRupiah(0);
+                    }
+                    const newQtySummaryRow = document.createElement('tr');
+                    newQtySummaryRow.classList.add('disabled-row'); // Indicate it's disabled or not used
+                    newQtySummaryRow.innerHTML = `
+                        <td>${materialName}</td>
+                        <td>${formatQuantity(0, unitText)}</td>
+                        <td>${formatQuantity(0, unitText)}</td>
                     `;
                     materialQtySummaryTbody.appendChild(newQtySummaryRow);
                 }
@@ -1459,13 +2127,14 @@
             const totalQtySummaryRow = document.createElement('tr');
             totalQtySummaryRow.classList.add('total-row');
             totalQtySummaryRow.innerHTML = `
-                <td colspan="2"><strong>Total Kuantitas Material</strong></td>
+                <td colspan="2"><strong>Total Material Quantity</strong></td>
                 <td class="calculated" id="all_materials_total_qty">${formatQuantity(materialsTotalQty, 'Kg')}</td>
             `;
             materialQtySummaryTbody.appendChild(totalQtySummaryRow);
 
 
-            document.getElementById('materials_total').textContent = formatRupiah(totalCost);
+            const materialsTotalElement = document.getElementById('materials_total');
+            if (materialsTotalElement) materialsTotalElement.innerHTML = formatRupiah(totalCost);
             return totalCost;
         }
 
@@ -1473,17 +2142,34 @@
         function calculateMaterialTotalQuantity() {
             let totalCombinedQuantity = 0;
             const total_volume = parseFloat(document.getElementById('total_volume').value) || 0;
+            let waste_percentage = parseFloat(document.getElementById('waste_percentage').value) || 0;
+
+            const adjusted_total_volume = total_volume * (1 + (waste_percentage / 100));
 
             const materialRows = document.querySelectorAll('#materials_tbody tr:not(.total-row)');
             materialRows.forEach(row => {
                 const checkbox = row.querySelector('.use-checkbox');
-                if (!checkbox || checkbox.checked) {
-                    const materialName = row.querySelector('td:nth-child(1)').textContent.trim();
+                const materialNameElement = row.querySelector('td:nth-child(1)');
+                const materialName = materialNameElement ? materialNameElement.textContent.trim() : '';
+                
+                // Determine material key for mix composition lookup
+                let materialKey = materialName.toLowerCase().replace(/ /g, '_');
+                if (materialName === 'Ink Powder') materialKey = 'ink_powder';
+                else if (materialName === 'Portland Cement') materialKey = 'portland_cement';
+                else if (materialName === 'River Sand') materialKey = 'river_sand';
+                else if (materialName === 'Plastic/Tarpaulin') materialKey = 'plastic_tarpaulin';
+                else if (materialName === 'Water') materialKey = 'water';
+
+                const isMaterialInMix = selectedMixDesign.composition[materialKey] !== undefined;
+
+                if ((!checkbox || checkbox.checked) && isMaterialInMix) {
                     const qtyInput = row.querySelector('input[data-cost-type="material-qty"]');
                     const quantityPerM3 = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
                     
-                    if (materialName !== 'Plastic/Tarpaulin') {
-                        totalCombinedQuantity += (quantityPerM3 * total_volume);
+                    // Only include in the total quantity if it's NOT Plastic/Tarpaulin (assuming this is not measured in Kg for total)
+                    // and its part of the selected mix
+                    if (materialKey !== 'plastic_tarpaulin') { // Use materialKey to check against internal names
+                        totalCombinedQuantity += (quantityPerM3 * adjusted_total_volume);
                     }
                 }
             });
@@ -1495,68 +2181,251 @@
         function calculateLabor() {
             let totalCost = 0;
             const laborRows = document.querySelectorAll('#labor_tbody tr:not(.total-row)');
-            let project_duration = parseFloat(document.getElementById('project_duration').value) || 0;
+            let project_duration_days = parseFloat(document.getElementById('project_duration').value) || 0;
+            const totalMixingHoursNeededDisplay = document.getElementById('total_mixing_hours_needed_display');
+            let total_mixing_hours_needed = parseFloat(totalMixingHoursNeededDisplay ? totalMixingHoursNeededDisplay.dataset.hours : 0) || 0; // Get from data attribute
+            const totalPrintingHoursNeededDisplay = document.getElementById('total_printing_hours_needed_display');
+            let total_printing_hours_needed = parseFloat(totalPrintingHoursNeededDisplay ? totalPrintingHoursNeededDisplay.dataset.hours : 0) || 0; // Get from data attribute
+
 
             laborRows.forEach(row => {
                 const checkbox = row.querySelector('.use-checkbox');
                 const calculatedCell = row.querySelector('.calculated');
 
                 if (!checkbox || checkbox.checked) {
+                    const positionElement = row.querySelector('td:first-child');
+                    const position = positionElement ? positionElement.textContent.trim() : '';
                     const qtyInput = row.querySelector('input[data-cost-type="labor-qty"]');
-                    const timeInput = row.querySelector('input[data-cost-type="labor-time"]');
-                    const rateInput = row.querySelector('input[data-cost-type="labor-rate"]');
+                    const timeInput = row.querySelector('input[data-cost-type="labor-time"]'); // Minutes per day
+                    const rateInput = row.querySelector('input[data-cost-type="labor-rate"]'); // Rate per hour
 
                     let quantity = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
                     let timePerDayMinutes = parseFloat(timeInput ? timeInput.value : 0) || 0;
                     let ratePerHour = parseFloat(rateInput ? rateInput.value : 0) || 0;
                     
-                    const hoursPerDay = timePerDayMinutes / 60;
-                    const dailyCostPerPerson = hoursPerDay * ratePerHour;
-                    const projectTotalCost = quantity * dailyCostPerPerson * project_duration;
+                    let projectTotalCost = 0;
+
+                    // Specific labor calculations based on roles and calculated project hours
+                    if (position === "Mixing Crew") {
+                        // Calculate total hours for mixing crew based on total mixing hours needed
+                        projectTotalCost = quantity * ratePerHour * total_mixing_hours_needed;
+                    } else if (position === "Printer Operator") {
+                        // Calculate total hours for printer operator based on total printing hours needed
+                        projectTotalCost = quantity * ratePerHour * total_printing_hours_needed;
+                    } else {
+                        // For other roles like Field Workers, Leader, Daily Workers, scale by overall project duration
+                        const hoursPerDay = timePerDayMinutes / 60;
+                        projectTotalCost = quantity * hoursPerDay * ratePerHour * project_duration_days;
+                    }
 
                     if (calculatedCell) {
-                        calculatedCell.textContent = formatRupiah(projectTotalCost);
+                        calculatedCell.innerHTML = formatRupiah(projectTotalCost);
                     }
                     totalCost += projectTotalCost;
                 } else {
                     if (calculatedCell) {
-                        calculatedCell.textContent = formatRupiah(0);
+                        calculatedCell.innerHTML = formatRupiah(0);
                     }
                 }
             });
-            document.getElementById('labor_total').textContent = formatRupiah(totalCost);
+            const laborTotal = document.getElementById('labor_total');
+            if (laborTotal) laborTotal.innerHTML = formatRupiah(totalCost);
             return totalCost;
         }
 
-        // Function to calculate reinforcing bar cost
-        function calculateRebar() {
-            let totalCost = 0;
-            const rebarRows = document.querySelectorAll('#rebar_tbody tr:not(.total-row)');
+        // Rebar Calculation Logic (Integrated from rebar_calculation.html)
+        // Data rebar weight per meter
+        const rebarWeights = {
+            8: 0.395,
+            10: 0.617,
+            12: 0.888,
+            13: 1.042,
+            16: 1.578
+        };
 
-            rebarRows.forEach(row => {
-                const checkbox = row.querySelector('.use-checkbox');
-                const lengthInput = row.querySelector('input[data-cost-type="rebar-length"]');
-                const pricePerMeterInput = row.querySelector('input[data-cost-type="rebar-price-per-meter"]');
-                const calculatedCell = row.querySelector('.calculated');
-
-                if (!checkbox || checkbox.checked) {
-                    const length = parseFloat(lengthInput ? lengthInput.value : 0) || 0;
-                    const pricePerMeter = parseFloat(pricePerMeterInput ? pricePerMeterInput.value : 0) || 0;
-                    
-                    const rowTotal = length * pricePerMeter;
-                    
-                    if (calculatedCell) {
-                        calculatedCell.textContent = formatRupiah(rowTotal);
-                    }
-                    totalCost += rowTotal;
-                } else {
-                    if (calculatedCell) {
-                        calculatedCell.textContent = formatRupiah(0);
-                    }
+        function calculateRebarSection() {
+            const length = parseFloat(document.getElementById('rebar_length_mm').value) || 0;
+            const width = parseFloat(document.getElementById('rebar_width_mm').value) || 0;
+            const height = parseFloat(document.getElementById('rebar_height_mm').value) || 0;
+            const segments = parseInt(document.getElementById('rebar_segments').value) || 1;
+            const rebarPrice = parseFloat(document.getElementById('rebar_price_per_kg').value) || 18000;
+            
+            // Validate inputs
+            if (length <= 0 || width <= 0 || height <= 0 || segments <= 0) {
+                console.warn("Please enter valid dimensions and number of segments for rebar calculation.");
+                // Set all rebar displays to 0
+                const rebarTotalWeightDisplay = document.getElementById('rebar_total_weight_display');
+                if (rebarTotalWeightDisplay) rebarTotalWeightDisplay.textContent = `0 kg`;
+                
+                const rebarTotalLengthDisplay = document.getElementById('rebar_total_length_display');
+                if (rebarTotalLengthDisplay) rebarTotalLengthDisplay.textContent = `0 m`;
+                
+                const rebarTotalCostDisplay = document.getElementById('rebar_total_cost_display');
+                if (rebarTotalCostDisplay) rebarTotalCostDisplay.innerHTML = formatRupiah(0);
+                
+                const rebarTotalBarsDisplay = document.getElementById('rebar_total_bars_display');
+                if (rebarTotalBarsDisplay) rebarTotalBarsDisplay.textContent = `0 bars`;
+                
+                const rebarDetailTableBody = document.getElementById('rebarDetailTableBody');
+                if (rebarDetailTableBody) rebarDetailTableBody.innerHTML = '';
+                
+                const rebarPriceGrid = document.getElementById('rebarPriceGrid');
+                if (rebarPriceGrid) rebarPriceGrid.innerHTML = '';
+                
+                const rebarNotesList = document.getElementById('rebarNotesList');
+                if (rebarNotesList) {
+                    rebarNotesList.innerHTML = `
+                        <li>Calculation based on <strong>0 segments</strong>.</li>
+                        <li>Rebar price: <strong>${formatRupiah(rebarPrice)}/kg</strong></li>
+                        <li>Estimate with 10% tolerance: <strong>0 kg</strong> / <strong>${formatRupiah(0)}</strong></li>
+                    `;
                 }
+                return 0; // Return 0 cost if inputs are invalid
+            }
+            
+            // Convert mm to m
+            const L = length / 1000;
+            const W = width / 1000;
+            const H = height / 1000;
+            
+            // Calculate joint lengths
+            const longitudinalJoints = (segments - 1) * L; // Longitudinal joints
+            const transverseJoints = segments * 2 * W; // Transverse joints (2 sides per segment)
+            const perimeter = 2 * (segments * L + W); // Ring beam perimeter
+            
+            // Calculate rebar requirements
+            const calculations = [
+                {
+                    type: 'Longitudinal Joints',
+                    length: longitudinalJoints,
+                    diameter: 12,
+                    rows: 2,
+                    totalLength: longitudinalJoints * 2,
+                    weight: longitudinalJoints * 2 * rebarWeights[12]
+                },
+                {
+                    type: 'Transverse Joints',
+                    length: transverseJoints,
+                    diameter: 10,
+                    rows: 2,
+                    totalLength: transverseJoints * 2,
+                    weight: transverseJoints * 2 * rebarWeights[10]
+                },
+                {
+                    type: 'Perimeter Ring Beam',
+                    length: perimeter,
+                    diameter: 13,
+                    rows: 4,
+                    totalLength: perimeter * 4,
+                    weight: perimeter * 4 * rebarWeights[13]
+                },
+                {
+                    type: 'Stirrups for Joints',
+                    length: 0, // This is not a direct length, but quantity based
+                    diameter: 8,
+                    rows: 0,
+                    totalLength: Math.max(60, segments * 10), // Example: 10 meters per segment, minimum 60m
+                    weight: Math.max(60, segments * 10) * rebarWeights[8]
+                },
+                {
+                    type: 'Dowel/Connectors',
+                    length: 0, // This is not a direct length, but quantity based
+                    diameter: 10,
+                    rows: 0,
+                    totalLength: Math.max(48, segments * 8), // Example: 8 meters per segment, minimum 48m
+                    weight: Math.max(48, segments * 8) * rebarWeights[10]
+                }
+            ];
+            
+            // Calculate totals
+            let totalWeight = 0;
+            let totalLength = 0;
+            let totalCost = 0;
+            
+            calculations.forEach(calc => {
+                totalWeight += calc.weight;
+                totalLength += calc.totalLength;
+                totalCost += calc.weight * rebarPrice;
             });
-            document.getElementById('rebar_total').textContent = formatRupiah(totalCost);
-            return totalCost;
+            
+            const totalBars = Math.ceil(totalLength / 12); // Assuming 12m standard rebar length
+
+            displayRebarResults(calculations, totalWeight, totalLength, totalCost, totalBars, rebarPrice, segments);
+            return totalCost; // Return the total rebar cost for the main calculation
+        }
+        
+        function displayRebarResults(calculations, totalWeight, totalLength, totalCost, totalBars, rebarPrice, segments) {
+            // Summary cards
+            const rebarTotalWeightDisplay = document.getElementById('rebar_total_weight_display');
+            if (rebarTotalWeightDisplay) rebarTotalWeightDisplay.textContent = `${Math.round(totalWeight)} kg`;
+            
+            const rebarTotalLengthDisplay = document.getElementById('rebar_total_length_display');
+            if (rebarTotalLengthDisplay) rebarTotalLengthDisplay.textContent = `${Math.round(totalLength)} m`;
+            
+            const rebarTotalCostDisplay = document.getElementById('rebar_total_cost_display');
+            if (rebarTotalCostDisplay) rebarTotalCostDisplay.innerHTML = formatRupiah(totalCost);
+            
+            const rebarTotalBarsDisplay = document.getElementById('rebar_total_bars_display');
+            if (rebarTotalBarsDisplay) rebarTotalBarsDisplay.textContent = `${totalBars} bars`;
+            
+            // Detail table
+            const rebarDetailTableBody = document.getElementById('rebarDetailTableBody');
+            if (rebarDetailTableBody) rebarDetailTableBody.innerHTML = '';
+            
+            if (rebarDetailTableBody) {
+                calculations.forEach(calc => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${calc.type}</strong></td>
+                        <td>${calc.length.toFixed(2)}</td>
+                        <td>D${calc.diameter}</td>
+                        <td>${calc.rows || '-'}</td>
+                        <td>${calc.totalLength.toFixed(1)}</td>
+                        <td>${calc.weight.toFixed(1)}</td>
+                    `;
+                    rebarDetailTableBody.appendChild(row);
+                });
+            }
+            
+            // Price breakdown by diameter
+            const rebarPriceGrid = document.getElementById('rebarPriceGrid'); 
+            if (rebarPriceGrid) rebarPriceGrid.innerHTML = '';
+            
+            if (rebarPriceGrid) {
+                const diameters = [...new Set(calculations.map(c => c.diameter))];
+                
+                diameters.forEach(diameter => {
+                    const relevantCalcs = calculations.filter(c => c.diameter === diameter);
+                    const diameterLength = relevantCalcs.reduce((sum, calc) => sum + calc.totalLength, 0);
+                    const diameterWeight = relevantCalcs.reduce((sum, calc) => sum + calc.weight, 0);
+                    const diameterCost = diameterWeight * rebarPrice;
+                    const diameterBars = Math.ceil(diameterLength / 12);
+                    
+                    const priceItem = document.createElement('div');
+                    priceItem.className = 'price-item';
+                    priceItem.innerHTML = `
+                        <strong>D${diameter}</strong><br>
+                        ${diameterLength.toFixed(1)}m<br>
+                        ${diameterWeight.toFixed(1)}kg<br>
+                        ${diameterBars} bars<br>
+                        <strong>${formatRupiah(diameterCost)}</strong>
+                    `;
+                    rebarPriceGrid.appendChild(priceItem); 
+                });
+            }
+            
+            // Notes
+            const rebarNotesList = document.getElementById('rebarNotesList');
+            if (rebarNotesList) {
+                rebarNotesList.innerHTML = `
+                    <li>Calculation is based on the **specific segment dimensions and number of segments** you input in this section, for on-site assembly.</li>
+                    <li>This calculation **does NOT automatically scale with the overall "Total Volume (m³)"** of your project. If you manually adjust the project's "Total Volume" and need the rebar cost to reflect that scale, you must manually adjust the "Number of Segments" or other dimensions in this section.</li>
+                    <li>Rebar is primarily for **segment joints** and tie structures.</li>
+                    <li>Add **10% tolerance** for field adjustments.</li>
+                    <li>Prepare **grooves/channels** on segments for rebar placement.</li>
+                    <li>Ensure proper alignment before final grouting.</li>
+                `;
+            }
         }
 
         // Function to toggle row and input states based on checkbox
@@ -1567,6 +2436,7 @@
             if (checkbox.checked) {
                 row.classList.remove('disabled-row');
                 inputs.forEach(input => {
+                    // Only restore original value if it's a number input, not readonly, and currently 0
                     if (input.type === 'number' && input.dataset.originalValue && parseFloat(input.value) === 0 && !input.readOnly) {
                         input.value = input.dataset.originalValue;
                         delete input.dataset.originalValue;
@@ -1576,10 +2446,12 @@
             } else {
                 row.classList.add('disabled-row');
                 inputs.forEach(input => {
+                    // Store current value if it's a number input and not readonly
                     if (input.type === 'number' && input.value !== "0" && !input.readOnly) {
                         input.dataset.originalValue = input.value;
                     }
                     input.setAttribute('disabled', 'true');
+                    // Clear value only if it's a number input and not readonly
                     if (input.type === 'number' && !input.readOnly) {
                         input.value = 0;
                     }
@@ -1591,12 +2463,13 @@
         // Functions for adding new rows dynamically
         function addMaterialRow() {
             const tbody = document.getElementById('materials_tbody');
+            if (!tbody) return; // Add null check
             const newRow = document.createElement('tr');
             newRow.innerHTML = `
                 <td><input type="text" class="editable" value="New Material" data-cost-type="material-name" onchange="calculateAll()"></td>
                 <td><input type="text" class="editable" value="Custom Description" data-cost-type="material-desc" onchange="calculateAll()"></td>
                 <td><input type="number" class="editable" data-cost-type="material-qty" value="1" step="0.1" onchange="calculateAll()"> Kg/m³</td>
-                <td><input type="number" class="editable" data-cost-type="material-price" value="1000" onchange="calculateAll()"> Rp/Kg</td>
+                <td><input type="number" class="editable" data-cost-type="material-price" value="1000" onchange="calculateAll()"> IDR/Kg</td>
                 <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
                 <td class="calculated"></td>
             `;
@@ -1610,30 +2483,9 @@
             calculateAll();
         }
 
-        function addRebarRow() {
-            const tbody = document.getElementById('rebar_tbody');
-            const newRow = document.createElement('tr');
-            newRow.innerHTML = `
-                <td><input type="text" class="editable" value="New Rebar" data-cost-type="rebar-name" onchange="calculateAll()"></td>
-                <td><input type="text" class="editable" value="Custom Description" data-cost-type="rebar-desc" onchange="calculateAll()"></td>
-                <td><input type="number" class="editable" data-cost-type="rebar-length" value="10" step="0.1" onchange="calculateAll()"></td>
-                <td>Meter</td>
-                <td><input type="number" class="editable" data-cost-type="rebar-price-per-meter" value="7000" onchange="calculateAll()"></td>
-                <td><input type="checkbox" class="use-checkbox" checked onchange="toggleRow(this)"></td>
-                <td class="calculated"></td>
-            `;
-            const totalRow = tbody.querySelector('.total-row');
-            if (totalRow) {
-                tbody.insertBefore(newRow, totalRow);
-            } else {
-                tbody.appendChild(newRow);
-            }
-            updateTotalColspan('rebar_tbody'); 
-            calculateAll();
-        }
-
         function addEquipmentRow() {
             const tbody = document.getElementById('equipment_tbody');
+            if (!tbody) return; // Add null check
             const newRow = document.createElement('tr');
             newRow.innerHTML = `
                 <td><input type="text" class="editable" value="New Equipment" data-cost-type="equipment-name" onchange="calculateAll()"></td>
@@ -1655,6 +2507,7 @@
 
         function addLaborRow() {
             const tbody = document.getElementById('labor_tbody');
+            if (!tbody) return; // Add null check
             const newRow = document.createElement('tr');
             newRow.innerHTML = `
                 <td><input type="text" class="editable" value="New Worker" data-cost-type="labor-name" onchange="calculateAll()"></td>
@@ -1678,69 +2531,147 @@
         // Function to dynamically update colspan for total rows
         function updateTotalColspan(tbodyId) {
             const tbody = document.getElementById(tbodyId);
+            if (!tbody) return; // Add null check
             const totalRow = tbody.querySelector('.total-row');
             if (totalRow) {
                 const totalTextCell = totalRow.querySelector('td:first-child');
                 const exampleRow = tbody.querySelector('tr:not(.total-row):not(.subheader-row)');
                 if (exampleRow) {
                     const numDataCellsInRow = exampleRow.querySelectorAll('td').length;
-                    totalTextCell.setAttribute('colspan', numDataCellsInRow - 1);
+                    if (totalTextCell) totalTextCell.setAttribute('colspan', numDataCellsInRow - 1);
                 } else {
                     const numHeaders = tbody.closest('table').querySelectorAll('thead th').length;
-                    totalTextCell.setAttribute('colspan', numHeaders - 1);
+                    if (totalTextCell) totalTextCell.setAttribute('colspan', numHeaders - 1);
                 }
             }
+        }
+
+        // Function to update the visibility and readonly state of L, W, H inputs
+        function updateVolumeSource() {
+            const calcFromLWHCheckbox = document.getElementById('calc_volume_from_lwh');
+            const lengthInput = document.getElementById('length_mm');
+            const widthInput = document.getElementById('width_mm');
+            const heightInput = document.getElementById('height_mm');
+            const totalVolumeInput = document.getElementById('total_volume');
+
+            if (!calcFromLWHCheckbox || !lengthInput || !widthInput || !heightInput || !totalVolumeInput) return; // Add null checks
+
+            if (calcFromLWHCheckbox.checked) {
+                lengthInput.removeAttribute('disabled');
+                widthInput.removeAttribute('disabled');
+                heightInput.removeAttribute('disabled');
+                totalVolumeInput.setAttribute('readonly', 'true');
+                // Force recalculate total_volume from LWH when checkbox is checked
+                const length = parseFloat(lengthInput.value) || 0;
+                const width = parseFloat(widthInput.value) || 0;
+                const height = parseFloat(heightInput.value) || 0;
+                const volume = (length / 1000) * (width / 1000) * (height / 1000);
+                totalVolumeInput.value = volume.toFixed(4);
+            } else {
+                lengthInput.setAttribute('disabled', 'true');
+                widthInput.setAttribute('disabled', 'true');
+                heightInput.setAttribute('disabled', 'true');
+                totalVolumeInput.removeAttribute('readonly');
+            }
+            calculateAll(); // Recalculate after source changes
         }
 
 
         // Main function to calculate all costs and update the summary
         function calculateAll() {
-            // --- Calculate Total Volume from L, W, H ---
-            const length_mm = parseFloat(document.getElementById('length_mm').value) || 0;
-            const width_mm = parseFloat(document.getElementById('width_mm').value) || 0;
-            const height_mm = parseFloat(document.getElementById('height_mm').value) || 0;
+            let total_volume;
+            const calcFromLWHCheckbox = document.getElementById('calc_volume_from_lwh');
+            const totalVolumeElement = document.getElementById('total_volume');
+            const displayVolumeElement = document.getElementById('display_volume');
 
-            let total_volume_calculated_m3 = (length_mm / 1000) * (width_mm / 1000) * (height_mm / 1000);
-            
-            document.getElementById('total_volume').value = total_volume_calculated_m3.toFixed(4);
-            document.getElementById('display_volume').textContent = total_volume_calculated_m3.toFixed(2);
-
-            let total_volume = total_volume_calculated_m3;
+            if (!calcFromLWHCheckbox || !totalVolumeElement || !displayVolumeElement) return; // Add null checks for critical elements
 
 
-            // --- Otomatisasi Project Duration ---
-            const volume_per_batch_for_hours = 0.2;
-            const time_per_batch_hours = 1;
-            const daily_operating_hours = parseFloat(document.getElementById('daily_operating_hours').value) || 0;
-
-            let calculated_project_duration_days = 0;
-            let total_hours_needed_for_project = 0;
-
-            if (total_volume > 0 && volume_per_batch_for_hours > 0) {
-                total_hours_needed_for_project = (total_volume / volume_per_batch_for_hours) * time_per_batch_hours;
-                if (daily_operating_hours > 0) {
-                    calculated_project_duration_days = total_hours_needed_for_project / daily_operating_hours;
-                } else {
-                    calculated_project_duration_days = total_hours_needed_for_project / 8;
-                }
+            if (calcFromLWHCheckbox.checked) {
+                const length_mm = parseFloat(document.getElementById('length_mm').value) || 0;
+                const width_mm = parseFloat(document.getElementById('width_mm').value) || 0;
+                const height_mm = parseFloat(document.getElementById('height_mm').value) || 0;
+                total_volume = (length_mm / 1000) * (width_mm / 1000) * (height_mm / 1000);
+                totalVolumeElement.value = total_volume.toFixed(4); // Update readonly field
+            } else {
+                total_volume = parseFloat(totalVolumeElement.value) || 0;
             }
             
-            document.getElementById('project_duration').value = calculated_project_duration_days.toFixed(2);
+            displayVolumeElement.textContent = total_volume.toFixed(2);
 
-            const total_minutes_needed_for_project = total_hours_needed_for_project * 60;
-            const display_hours = Math.floor(total_minutes_needed_for_project / 60);
-            const display_minutes = Math.round(total_minutes_needed_for_project % 60);
-            document.getElementById('project_duration_hours_minutes').textContent = `(${display_hours} hours, ${display_minutes} minutes)`;
+
+            // --- Automate Project Duration and Scheduling ---
+            const printerOperatingHoursPerDay = document.getElementById('printer_operating_hours_per_day');
+            const mixingOperatingHoursPerDay = document.getElementById('mixing_operating_hours_per_day');
+            const projectDurationElement = document.getElementById('project_duration');
+            const projectDurationHoursMinutes = document.getElementById('project_duration_hours_minutes');
+
+
+            const printer_operating_hours_per_day = parseFloat(printerOperatingHoursPerDay ? printerOperatingHoursPerDay.value : 0) || 0;
+            const mixing_operating_hours_per_day = parseFloat(mixingOperatingHoursPerDay ? mixingOperatingHoursPerDay.value : 0) || 0;
+            
+            // Printing Time Calculation (re-use logic from calculatePrinterCost for hours needed)
+            const printing_rate_m3_per_hour = 0.2; // Assuming 0.2 m³ material printed in 1 hour
+            let total_printing_hours_needed = 0;
+            if (total_volume > 0 && printing_rate_m3_per_hour > 0) {
+                total_printing_hours_needed = total_volume / printing_rate_m3_per_hour;
+            }
+            // Store for labor calculation
+            const totalPrintingHoursDisplay = document.getElementById('total_printing_hours_needed_display');
+            if (totalPrintingHoursDisplay) {
+                totalPrintingHoursDisplay.dataset.hours = total_printing_hours_needed;
+            }
+
+
+            // Mixing Time Calculation (using selected mix design's mixing time per batch)
+            const volume_per_batch_for_mixing = selectedMixDesign.composition.total_volume_per_batch_m3;
+            const mixing_time_per_batch_hours = selectedMixDesign.composition.mixing_time_per_batch_hours; // e.g., 0.5 hours
+
+            let total_mixing_hours_needed = 0;
+            if (total_volume > 0 && volume_per_batch_for_mixing > 0) {
+                const num_batches = total_volume / volume_per_batch_for_mixing;
+                total_mixing_hours_needed = num_batches * mixing_time_per_batch_hours;
+            }
+            // Store for labor calculation
+            const totalMixingHoursDisplay = document.getElementById('total_mixing_hours_needed_display');
+            if (totalMixingHoursDisplay) {
+                totalMixingHoursDisplay.dataset.hours = total_mixing_hours_needed;
+            }
+
+
+            // Calculate project duration based on the critical path (max of printing or mixing time)
+            let calculated_project_duration_days = 0;
+            if (printer_operating_hours_per_day > 0 && mixing_operating_hours_per_day > 0) {
+                const printing_days = total_printing_hours_needed / printer_operating_hours_per_day;
+                const mixing_days = total_mixing_hours_needed / mixing_operating_hours_per_day;
+                calculated_project_duration_days = Math.max(printing_days, mixing_days);
+            } else if (printer_operating_hours_per_day > 0) {
+                calculated_project_duration_days = total_printing_hours_needed / printer_operating_hours_per_day;
+            } else if (mixing_operating_hours_per_day > 0) {
+                calculated_project_duration_days = total_mixing_hours_needed / mixing_operating_hours_per_day;
+            } else {
+                 calculated_project_duration_days = total_printing_hours_needed / 8; // Fallback to 8 hours/day
+            }
+
+            if (projectDurationElement) projectDurationElement.value = calculated_project_duration_days.toFixed(2);
+
+            const display_hours = Math.floor(calculated_project_duration_days * (printer_operating_hours_per_day > 0 ? printer_operating_hours_per_day : 8));
+            const display_minutes = Math.round((calculated_project_duration_days * (printer_operating_hours_per_day > 0 ? printer_operating_hours_per_day : 8) * 60) % 60);
+            if (projectDurationHoursMinutes) projectDurationHoursMinutes.textContent = `(${display_hours} hours, ${display_minutes} minutes)`;
+            // --- End Automate Project Duration and Scheduling ---
 
 
             updateInkExtrusionCostDisplay();
 
 
-            const printer_cost = calculatePrinterCost();
+            const printer_result = calculatePrinterCost(); // This now returns an object { cost, total_printing_hours_needed }
+            const printer_cost = printer_result.cost;
+
             const equipment_total = calculateEquipment();
             const materials_total = calculateMaterials();
-            const labor_total = calculateLabor();
-            const rebar_total = calculateRebar(); 
+            const labor_total = calculateLabor(); // Labor calculation now uses total_mixing_hours_needed and total_printing_hours_needed internally
+            const rebar_total = calculateRebarSection(); // Call the integrated rebar calculation
+
 
             const grand_total_project = printer_cost + equipment_total + materials_total + labor_total + rebar_total;
             
@@ -1749,59 +2680,357 @@
                 cost_per_cubic = grand_total_project / total_volume;
             }
 
-            document.getElementById('cost_per_cubic').textContent = formatRupiah(cost_per_cubic);
+            const costPerCubicElement = document.getElementById('cost_per_cubic');
+            if (costPerCubicElement) costPerCubicElement.innerHTML = formatRupiah(cost_per_cubic);
 
-            document.getElementById('printer_per_cubic').textContent = formatRupiah(printer_cost / (total_volume > 0 ? total_volume : 1));
-            document.getElementById('printer_project_total').textContent = formatRupiah(printer_cost);
+            const printerPerCubic = document.getElementById('printer_per_cubic');
+            if (printerPerCubic) printerPerCubic.innerHTML = formatRupiah(printer_cost / (total_volume > 0 ? total_volume : 1));
+            const printerProjectTotal = document.getElementById('printer_project_total');
+            if (printerProjectTotal) printerProjectTotal.innerHTML = formatRupiah(printer_cost);
 
-            document.getElementById('equipment_per_cubic').textContent = formatRupiah(equipment_total / (total_volume > 0 ? total_volume : 1));
-            document.getElementById('equipment_project_total').textContent = formatRupiah(equipment_total);
+            const equipmentPerCubic = document.getElementById('equipment_per_cubic');
+            if (equipmentPerCubic) equipmentPerCubic.innerHTML = formatRupiah(equipment_total / (total_volume > 0 ? total_volume : 1));
+            const equipmentProjectTotal = document.getElementById('equipment_project_total');
+            if (equipmentProjectTotal) equipmentProjectTotal.innerHTML = formatRupiah(equipment_total);
 
-            document.getElementById('materials_per_cubic').textContent = formatRupiah(materials_total / (total_volume > 0 ? total_volume : 1)); 
-            document.getElementById('materials_project_total').textContent = formatRupiah(materials_total);
+            const materialsPerCubic = document.getElementById('materials_per_cubic');
+            if (materialsPerCubic) materialsPerCubic.innerHTML = formatRupiah(materials_total / (total_volume > 0 ? total_volume : 1));
+            const materialsProjectTotal = document.getElementById('materials_project_total');
+            if (materialsProjectTotal) materialsProjectTotal.innerHTML = formatRupiah(materials_total);
 
-            document.getElementById('labor_per_cubic').textContent = formatRupiah(labor_total / (total_volume > 0 ? total_volume : 1));
-            document.getElementById('labor_project_total').textContent = formatRupiah(labor_total); 
+            const laborPerCubic = document.getElementById('labor_per_cubic');
+            if (laborPerCubic) laborPerCubic.innerHTML = formatRupiah(labor_total / (total_volume > 0 ? total_volume : 1));
+            const laborProjectTotal = document.getElementById('labor_project_total');
+            if (laborProjectTotal) laborProjectTotal.innerHTML = formatRupiah(labor_total);
 
-            document.getElementById('rebar_per_cubic').textContent = formatRupiah(rebar_total / (total_volume > 0 ? total_volume : 1));
-            document.getElementById('rebar_project_total').textContent = formatRupiah(rebar_total);
+            const rebarPerCubic = document.getElementById('rebar_per_cubic');
+            if (rebarPerCubic) rebarPerCubic.innerHTML = formatRupiah(rebar_total / (total_volume > 0 ? total_volume : 1));
+            const rebarProjectTotal = document.getElementById('rebar_project_total');
+            if (rebarProjectTotal) rebarProjectTotal.innerHTML = formatRupiah(rebar_total);
 
-            document.getElementById('grand_total_per_cubic').textContent = formatRupiah(cost_per_cubic);
-            document.getElementById('grand_total_project').textContent = formatRupiah(grand_total_project);
+            const grandTotalPerCubic = document.getElementById('grand_total_per_cubic');
+            if (grandTotalPerCubic) grandTotalPerCubic.innerHTML = formatRupiah(cost_per_cubic);
+            const grandTotalProjectElement = document.getElementById('grand_total_project');
+            if (grandTotalProjectElement) grandTotalProjectElement.innerHTML = formatRupiah(grand_total_project);
 
             updatePercentages(grand_total_project, printer_cost, equipment_total, materials_total, labor_total, rebar_total);
+            saveHistory(grand_total_project, cost_per_cubic); // Save calculation to history
         }
 
         // Function to update percentages in the summary table
         function updatePercentages(grandTotal, printerCost, equipmentCost, materialsCost, laborCost, rebarCost) {
             if (grandTotal === 0) {
-                document.getElementById('printer_percentage').textContent = '0%';
-                document.getElementById('equipment_percentage').textContent = '0%';
-                document.getElementById('materials_percentage').textContent = '0%';
-                document.getElementById('labor_percentage').textContent = '0%';
-                document.getElementById('rebar_percentage').textContent = '0%';
-                document.getElementById('grand_total_percentage').textContent = '0%'; 
+                const printerPercentage = document.getElementById('printer_percentage');
+                if (printerPercentage) printerPercentage.textContent = '0%';
+                const equipmentPercentage = document.getElementById('equipment_percentage');
+                if (equipmentPercentage) equipmentPercentage.textContent = '0%';
+                const materialsPercentage = document.getElementById('materials_percentage');
+                if (materialsPercentage) materialsPercentage.textContent = '0%';
+                const laborPercentage = document.getElementById('labor_percentage');
+                if (laborPercentage) laborPercentage.textContent = '0%';
+                const rebarPercentage = document.getElementById('rebar_percentage');
+                if (rebarPercentage) rebarPercentage.textContent = '0%';
+                const grandTotalPercentage = document.getElementById('grand_total_percentage');
+                if (grandTotalPercentage) grandTotalPercentage.textContent = '0%'; 
                 return;
             }
 
-            document.getElementById('printer_percentage').textContent = ((printerCost / grandTotal) * 100).toFixed(1) + '%';
-            document.getElementById('equipment_percentage').textContent = ((equipmentCost / grandTotal) * 100).toFixed(1) + '%';
-            document.getElementById('materials_percentage').textContent = ((materialsCost / grandTotal) * 100).toFixed(1) + '%';
-            document.getElementById('labor_percentage').textContent = ((laborCost / grandTotal) * 100).toFixed(1) + '%';
-            document.getElementById('rebar_percentage').textContent = ((rebarCost / grandTotal) * 100).toFixed(1) + '%';
-            document.getElementById('grand_total_percentage').textContent = '100%'; 
+            const printerPercentage = document.getElementById('printer_percentage');
+            if (printerPercentage) printerPercentage.textContent = ((printerCost / grandTotal) * 100).toFixed(1) + '%';
+            const equipmentPercentage = document.getElementById('equipment_percentage');
+            if (equipmentPercentage) equipmentPercentage.textContent = ((equipmentCost / grandTotal) * 100).toFixed(1) + '%';
+            const materialsPercentage = document.getElementById('materials_percentage');
+            if (materialsPercentage) materialsPercentage.textContent = ((materialsCost / grandTotal) * 100).toFixed(1) + '%';
+            const laborPercentage = document.getElementById('labor_percentage');
+            if (laborPercentage) laborPercentage.textContent = ((laborCost / grandTotal) * 100).toFixed(1) + '%';
+            const rebarPercentage = document.getElementById('rebar_percentage');
+            if (rebarPercentage) rebarPercentage.textContent = ((rebarCost / grandTotal) * 100).toFixed(1) + '%';
+            const grandTotalPercentage = document.getElementById('grand_total_percentage');
+            if (grandTotalPercentage) grandTotalPercentage.textContent = '100%'; 
         }
 
-        // Initialize calculations on page load
+        // Function to handle image preview
+        function previewProjectImage(event) {
+            const reader = new FileReader();
+            reader.onload = function(){
+                const output = document.getElementById('project_preview_image');
+                if (output) {
+                    output.src = reader.result;
+                    output.style.display = 'block'; // Show the image
+                }
+            };
+            if (event.target.files[0]) reader.readAsDataURL(event.target.files[0]);
+        }
+
+        // Function to export the entire document content to an image
+        async function exportToImage() {
+            const body = document.body;
+            const container = document.querySelector('.container');
+            if (!body || !container) return; // Add null checks
+
+            // Set flag to true before capturing
+            isExportingOrPrinting = true;
+            // Recalculate all to ensure Rupiah formatting is correct for export
+            calculateAll();
+
+            // Temporarily add a class to body to apply print-like styles for capture
+            body.classList.add('export-mode');
+
+            try {
+                // Capture the content of the container
+                const canvas = await html2canvas(container, {
+                    scale: 2, // Increase scale for better resolution
+                    useCORS: true // Needed if you have images from external domains
+                });
+
+                // Create a download link for the image
+                const link = document.createElement('a');
+                link.download = '3d_printed_concrete_cost_report.png';
+                link.href = canvas.toDataURL('image/png'); // You can change to 'image/jpeg' if preferred
+                document.body.appendChild(link); // Append to body to make it clickable
+                link.click(); // Programmatically click the link to trigger download
+                document.body.removeChild(link); // Clean up the link
+            } catch (error) {
+                console.error("Failed to export to image:", error);
+                alert("Failed to export report to image. Please try again."); // Using alert() as a fallback for user notification
+            } finally {
+                // Remove the class after capture, whether successful or not
+                body.classList.remove('export-mode');
+                // Reset flag and recalculate to show USD again
+                isExportingOrPrinting = false;
+                calculateAll();
+            }
+        }
+
+        // Override window.print to set and unset the flag
+        const originalPrint = window.print;
+        window.print = function() {
+            isExportingOrPrinting = true;
+            calculateAll(); // Recalculate all to ensure Rupiah formatting is correct for print
+            originalPrint();
+            // Use a timeout to ensure print dialog is closed before reverting
+            setTimeout(() => {
+                isExportingOrPrinting = false;
+                calculateAll(); // Reset to show USD again
+            }, 1000); // A small delay to ensure rendering is complete
+        };
+
+        // --- Firestore History Functions ---
+        async function saveHistory(grandTotalProject, costPerCubic) {
+            // Updated: Menggunakan window.isAuthReady() dan window.getUserId()
+            if (!window.isAuthReady()) {
+                console.log("Authentication not ready. Cannot save history.");
+                return;
+            }
+            // Pastikan __app_id sudah tersedia dari lingkungan Canvas
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // Fallback if not defined in Canvas environment
+
+            const historyCollection = window.collection(window.db, `artifacts/${appId}/users/${window.getUserId()}/calculations`); // Updated Firestore modular API
+            const projectName = document.getElementById('project_name')?.value || 'Untitled Project'; // Add null check
+            const totalVolume = parseFloat(document.getElementById('total_volume')?.value) || 0; // Add null check
+
+            const historyData = {
+                timestamp: window.serverTimestamp(),
+                projectName: projectName,
+                totalVolume: totalVolume,
+                grandTotalProject: grandTotalProject,
+                costPerCubic: costPerCubic,
+                // Capture current summary data for more detail in history
+                summaryDetails: {
+                    printer: {
+                        description: document.getElementById('selected_printer_summary')?.textContent || 'N/A', // Add null check
+                        costPerCubic: parseFloat(document.getElementById('printer_per_cubic')?.textContent.replace(/[Rp ,]/g, '') || 0), // Add null check
+                        totalProject: parseFloat(document.getElementById('printer_project_total')?.textContent.replace(/[Rp ,]/g, '') || 0) // Add null check
+                    },
+                    equipment: {
+                        costPerCubic: parseFloat(document.getElementById('equipment_per_cubic')?.textContent.replace(/[Rp ,]/g, '') || 0),
+                        totalProject: parseFloat(document.getElementById('equipment_project_total')?.textContent.replace(/[Rp ,]/g, '') || 0)
+                    },
+                    materials: {
+                        costPerCubic: parseFloat(document.getElementById('materials_per_cubic')?.textContent.replace(/[Rp ,]/g, '') || 0),
+                        totalProject: parseFloat(document.getElementById('materials_project_total')?.textContent.replace(/[Rp ,]/g, '') || 0)
+                    },
+                    labor: {
+                        costPerCubic: parseFloat(document.getElementById('labor_per_cubic')?.textContent.replace(/[Rp ,]/g, '') || 0),
+                        totalProject: parseFloat(document.getElementById('labor_project_total')?.textContent.replace(/[Rp ,]/g, '') || 0)
+                    },
+                    rebar: {
+                        costPerCubic: parseFloat(document.getElementById('rebar_per_cubic')?.textContent.replace(/[Rp ,]/g, '') || 0),
+                        totalProject: parseFloat(document.getElementById('rebar_project_total')?.textContent.replace(/[Rp ,]/g, '') || 0)
+                    }
+                }
+            };
+
+            try {
+                await window.addDoc(historyCollection, historyData); // Updated Firestore modular API
+                console.log("Calculation saved to history.");
+            } catch (error) {
+                console.error("Error saving history:", error);
+            }
+        }
+
+        function loadHistory() {
+            const historyTbody = document.getElementById('history_tbody');
+            if (!historyTbody) return;
+
+            historyTbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Loading history...</td></tr>';
+            const userIdDisplay = document.getElementById('user_id_display');
+            if (userIdDisplay) userIdDisplay.textContent = window.getUserId();
+
+            // Wait for authentication to be ready before fetching data
+            if (!window.isAuthReady()) {
+                window.addEventListener('authReady', () => {
+                    fetchAndDisplayHistory();
+                }, { once: true }); // Listen only once
+            } else {
+                fetchAndDisplayHistory();
+            }
+
+            function fetchAndDisplayHistory() {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // Fallback if not defined in Canvas environment
+                // Updated Firestore modular API
+                const historyCollectionRef = window.collection(window.db, `artifacts/${appId}/users/${window.getUserId()}/calculations`);
+                const q = window.query(historyCollectionRef, window.orderBy('timestamp', 'desc'));
+
+                window.onSnapshot(q, (snapshot) => {
+                    historyTbody.innerHTML = ''; // Clear existing
+                    if (snapshot.empty) {
+                        historyTbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No history found. Start calculating!</td></tr>';
+                        return;
+                    }
+
+                    snapshot.forEach((doc) => {
+                        const data = doc.data();
+                        const date = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString() : 'N/A';
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${date}</td>
+                            <td>${data.projectName || 'N/A'}</td>
+                            <td>${data.totalVolume ? data.totalVolume.toFixed(2) : '0.00'} m³</td>
+                            <td>${data.costPerCubic ? formatRupiah(data.costPerCubic) : 'Rp 0'}</td>
+                            <td>${data.grandTotalProject ? formatRupiah(data.grandTotalProject) : 'Rp 0'}</td>
+                            <td><button onclick="viewHistoryDetails('${doc.id}')" class="btn" style="padding: 5px 10px; font-size: 0.8em;">View Details</button></td>
+                        `;
+                        historyTbody.appendChild(row);
+                    });
+                }, (error) => {
+                    console.error("Error loading history:", error);
+                    historyTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: red;">Error loading history: ${error.message}</td></tr>`;
+                });
+            }
+        }
+
+        async function viewHistoryDetails(docId) {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // Fallback if not defined in Canvas environment
+            // Updated Firestore modular API
+            const docRef = window.doc(window.db, `artifacts/${appId}/users/${window.getUserId()}/calculations`, docId);
+            try {
+                const docSnap = await window.getDoc(docRef); 
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    let detailsHtml = `
+                        <h3>Calculation Details: ${data.projectName}</h3>
+                        <p>Date: ${data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString() : 'N/A'}</p>
+                        <p>Total Volume: ${data.totalVolume ? data.totalVolume.toFixed(2) : '0.00'} m³</p>
+                        <p>Cost per m³: ${data.costPerCubic ? formatRupiah(data.costPerCubic) : 'Rp 0'}</p>
+                        <p>Total Project Cost: ${data.grandTotalProject ? formatRupiah(data.grandTotalProject) : 'Rp 0'}</p>
+                        <h4>Cost Breakdown:</h4>
+                        <ul>
+                            <li>3D Printer: ${data.summaryDetails?.printer?.description || 'N/A'} - ${data.summaryDetails?.printer?.totalProject ? formatRupiah(data.summaryDetails.printer.totalProject) : 'Rp 0'}</li>
+                            <li>Equipment & Rentals: ${data.summaryDetails?.equipment?.totalProject ? formatRupiah(data.summaryDetails.equipment.totalProject) : 'Rp 0'}</li>
+                            <li>Raw Materials: ${data.summaryDetails?.materials?.totalProject ? formatRupiah(data.summaryDetails.materials.totalProject) : 'Rp 0'}</li>
+                            <li>Labor: ${data.summaryDetails?.labor?.totalProject ? formatRupiah(data.summaryDetails.labor.totalProject) : 'Rp 0'}</li>
+                            <li>Rebar: ${data.summaryDetails?.rebar?.totalProject ? formatRupiah(data.summaryDetails.rebar.totalProject) : 'Rp 0'}</li>
+                        </ul>
+                    `;
+                    // Display in a simple alert or custom modal (for this example, using alert for simplicity)
+                    // In a production app, you'd use a nicer modal/popup.
+                    alert(detailsHtml.replace(/<[^>]*>/g, '\n').replace(/\n\n+/g, '\n').trim()); // Basic text version for alert
+                } else {
+                    alert("No such document!");
+                }
+            } catch (error) {
+                console.error("Error viewing history details:", error);
+                alert("Error viewing details: " + error.message);
+            }
+        }
+
+        async function clearHistory() {
+            if (!confirm("Are you sure you want to delete all your calculation history? This action cannot be undone.")) {
+                return;
+            }
+
+            if (!window.isAuthReady()) {
+                console.log("Authentication not ready. Cannot clear history.");
+                alert("Authentication not ready. Please wait or refresh.");
+                return;
+            }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // Fallback if not defined in Canvas environment
+            
+            // Updated Firestore modular API
+            const historyCollectionRef = window.collection(window.db, `artifacts/${appId}/users/${window.getUserId()}/calculations`);
+            const q = window.query(historyCollectionRef); // Query to get all documents for the user
+
+            try {
+                const snapshot = await window.getDocs(q); 
+                const deletePromises = [];
+                snapshot.forEach((doc) => {
+                    deletePromises.push(window.deleteDoc(doc.ref)); 
+                });
+                await Promise.all(deletePromises);
+                alert("All history cleared successfully!");
+                // No need to manually clear tbody, onSnapshot will handle it.
+            } catch (error) {
+                console.error("Error clearing history:", error);
+                alert("Error clearing history: " + error.message);
+            }
+        }
+
+        // Initialize calculations and load history on page load
         document.addEventListener('DOMContentLoaded', () => {
+            // Add hidden elements to store total mixing/printing hours for labor calculation
+            const body = document.body;
+            let hiddenDiv = document.getElementById('hidden_scheduling_data');
+            if (!hiddenDiv) {
+                hiddenDiv = document.createElement('div');
+                hiddenDiv.id = 'hidden_scheduling_data';
+                hiddenDiv.style.display = 'none';
+                hiddenDiv.innerHTML = `
+                    <span id="total_mixing_hours_needed_display" data-hours="0"></span>
+                    <span id="total_printing_hours_needed_display" data-hours="0"></span>
+                `;
+                body.appendChild(hiddenDiv);
+            }
+
+            // Ensure Firebase `db` and `auth` are initialized from the script module.
+            // These are now globally available after the module script runs.
+            // We need to wait for the auth state to be ready before calling loadHistory.
+            window.addEventListener('authReady', () => {
+                loadHistory(); // Load history after auth is confirmed ready
+                const userIdDisplay = document.getElementById('user_id_display');
+                if (userIdDisplay) userIdDisplay.textContent = window.getUserId();
+            });
+
+
             renderPrinterCards();
+            // Select Win Sun and its first option by default
             selectPrinter(PRINTERS[0].name, 0, 0); 
+            renderMixDesignOptions(); // Render mix design options on load
             updateProjectNameForPrint();
+            
+            // Update colspans for all tables
             updateTotalColspan('materials_tbody');
-            updateTotalColspan('rebar_tbody');
             updateTotalColspan('equipment_tbody');
             updateTotalColspan('labor_tbody');
+            
+            // Set initial labor quantities as per user's preference
+            document.getElementById('workers_qty').value = "2";
+            document.getElementById('supervisor_qty').value = "1";
+
+            // Update initial state of volume source control
+            updateVolumeSource(); // This will also trigger calculateAll()
         });
+
     </script>
 </body>
 </html>
