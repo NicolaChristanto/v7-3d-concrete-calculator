@@ -692,6 +692,7 @@
                 text-align: right !important;
                 width: auto !important;
                 max-width: none !important;
+                padding: initial !important;
             }
 
             table {
@@ -2096,7 +2097,7 @@
                         unitText = 'Kg'; // Default for other materials
                     }
                 }
-               
+                
 
                 // Determine material key for mix composition lookup (e.g., "Ink Powder" -> "ink_powder")
                 let materialKey = materialName.toLowerCase().replace(/ /g, '_');
@@ -2534,7 +2535,7 @@
             } else {
                 tbody.appendChild(newRow);
             }
-            updateTotalColspan('materials_tbody'); 
+            updateTotalColspan('materials_tbody');
             calculateAll();
         }
 
@@ -2556,7 +2557,7 @@
             } else {
                 tbody.appendChild(newRow);
             }
-            updateTotalColspan('equipment_tbody'); 
+            updateTotalColspan('equipment_tbody');
             calculateAll();
         }
 
@@ -2579,7 +2580,7 @@
             } else {
                 tbody.appendChild(newRow);
             }
-            updateTotalColspan('labor_tbody'); 
+            updateTotalColspan('labor_tbody');
             calculateAll();
         }
 
@@ -2666,7 +2667,7 @@
             const mixing_operating_hours_per_day = parseFloat(mixingOperatingHoursPerDay ? mixingOperatingHoursPerDay.value : 0) || 0;
             
             // Printing Time Calculation (re-use logic from calculatePrinterCost for hours needed)
-            const printing_rate_m3_per_hour = 0.32; // UPDATED PRINTING RATE
+            const printing_rate_m3_per_hour = 0.3; // UPDATED PRINTING RATE TO 0.3
             let total_printing_hours_needed = 0;
             if (total_volume > 0 && printing_rate_m3_per_hour > 0) {
                 total_printing_hours_needed = total_volume / printing_rate_m3_per_hour;
@@ -2895,14 +2896,14 @@
                 projectName: projectName,
                 totalVolume: totalVolume,
                 grandTotalProject: grandTotalProject, // Still save in IDR internally
-                costPerCubic: costPerCubic,           // Still save in IDR internally
+                costPerCubic: costPerCubic,            // Still save in IDR internally
                 selectedCurrency: selectedCurrencyCode, // Save the currency that was active when saved
                 // Capture current summary data for more detail in history
                 summaryDetails: {
                     printer: {
                         description: document.getElementById('selected_printer_summary')?.textContent || 'N/A', // Add null check
                         costPerCubic: parseFloat(document.getElementById('printer_per_cubic')?.textContent.replace(/[^0-9.-]+/g, '') || 0), // Clean string before parsing
-                        totalProject: parseFloat(document.getElementById('printer_project_total')?.textContent.replace(/[^0-9.-]+/g, '') || 0) 
+                        totalProject: parseFloat(document.getElementById('printer_project_total')?.textContent.replace(/[^0-9.-]+/g, '') || 0)
                     },
                     equipment: {
                         costPerCubic: parseFloat(document.getElementById('equipment_per_cubic')?.textContent.replace(/[^0-9.-]+/g, '') || 0),
@@ -3162,4 +3163,5 @@
     </script>
 </body>
 </html>
+
 
