@@ -347,13 +347,6 @@
             color: #4A90E2;
         }
         
-        .printer-name {
-            font-size: 1.1em;
-            font-weight: bold;
-            color: #333333;
-            margin-bottom: 15px;
-        }
-        
         .pricing-options {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -836,10 +829,10 @@
             .summary-section tbody td:nth-child(4) { /* Adjusted column index */
                 font-size: 0.9em !important; /* Make numbers slightly smaller */
             }
-            /* Hide USD currency span in print mode */
-            .usd-currency {
+            /* REMOVED: Hide USD currency span in print mode */
+            /* .usd-currency {
                 display: none !important;
-            }
+            } */
 
 
             #material_qty_summary_tbody th:nth-child(1),
@@ -958,10 +951,10 @@
         body.export-mode .summary-section tbody td:nth-child(4) { /* Adjusted column index */
             font-size: 0.9em !important; /* Make numbers slightly smaller */
         }
-        /* Hide USD currency span in export mode */
-        body.export-mode .usd-currency {
+        /* REMOVED: Hide USD currency span in export mode */
+        /* body.export-mode .usd-currency {
             display: none !important;
-        }
+        } */
 
 
         /* Continue with existing print/export layout adjustments for consistency */
@@ -1931,30 +1924,24 @@
 
         // Function to format numbers to selected currency with USD indicator
         function formatCost(amountInIDR) {
-            // If we are printing or exporting image, omit the USD part for cleaner layout
-            if (isExportingOrPrinting) {
-                const currentCurrencyValue = amountInIDR / EXCHANGE_RATES_TO_IDR[selectedCurrencyCode];
-                const formatter = new Intl.NumberFormat(CURRENCY_FORMATS[selectedCurrencyCode].locale, {
-                    minimumFractionDigits: 0, 
-                    maximumFractionDigits: 0 
-                });
-                return `${CURRENCY_FORMATS[selectedCurrencyCode].symbol} ${formatter.format(currentCurrencyValue)}`;
-            }
-            
-            // Calculate and format the USD equivalent
-            const usdAmount = amountInIDR / EXCHANGE_RATES_TO_IDR['USD'];
-            const formattedUsd = usdAmount.toFixed(2); // Two decimal places for USD
-
-            // Calculate and format the selected currency amount
             const currentCurrencyValue = amountInIDR / EXCHANGE_RATES_TO_IDR[selectedCurrencyCode];
             const formatter = new Intl.NumberFormat(CURRENCY_FORMATS[selectedCurrencyCode].locale, {
                 minimumFractionDigits: 0, 
                 maximumFractionDigits: 0 
             });
             const formattedCurrentCurrency = formatter.format(currentCurrencyValue);
+            const currentSymbol = CURRENCY_FORMATS[selectedCurrencyCode].symbol;
 
-            // Combine both with inline styling for USD in browser view
-            return `${CURRENCY_FORMATS[selectedCurrencyCode].symbol} ${formattedCurrentCurrency} <span class="usd-currency">(${formattedUsd} USD)</span>`;
+            let output = `${currentSymbol} ${formattedCurrentCurrency}`;
+
+            // Only add USD equivalent if the selected currency is NOT USD
+            if (selectedCurrencyCode !== 'USD') {
+                const usdAmount = amountInIDR / EXCHANGE_RATES_TO_IDR['USD'];
+                const formattedUsd = usdAmount.toFixed(2);
+                output += ` <span class="usd-currency">(${formattedUsd} USD)</span>`;
+            }
+            
+            return output;
         }
 
         // Function to format quantities (e.g., Kg, L, Unit)
@@ -2592,7 +2579,7 @@
             }
             
             // Price breakdown by diameter
-            const rebarPriceGrid = document.getElementById('rebarPriceGrid'); 
+            const rebarPriceGrid = document.getElementById('rebarPriceGrid');  
             if (rebarPriceGrid) rebarPriceGrid.innerHTML = '';
             
             if (rebarPriceGrid) {
@@ -2614,7 +2601,7 @@
                         ${diameterBars} bars<br>
                         <strong>${formatCost(diameterCost)}</strong>
                     `;
-                    rebarPriceGrid.appendChild(priceItem); 
+                    rebarPriceGrid.appendChild(priceItem);  
                 });
             }
             
@@ -2635,7 +2622,7 @@
         // Function to toggle row and input states based on checkbox
         function toggleRow(checkbox) {
             const row = checkbox.closest('tr');
-            const inputs = row.querySelectorAll('input.editable'); 
+            const inputs = row.querySelectorAll('input.editable');  
             
             if (checkbox.checked) {
                 row.classList.remove('disabled-row');
@@ -2993,7 +2980,7 @@
                 const rebarPercentage = document.getElementById('rebar_percentage');
                 if (rebarPercentage) rebarPercentage.textContent = '0%';
                 const grandTotalPercentage = document.getElementById('grand_total_percentage');
-                if (grandTotalPercentage) grandTotalPercentage.textContent = '0%'; 
+                if (grandTotalPercentage) grandTotalPercentage.textContent = '0%';  
                 return;
             }
 
@@ -3008,7 +2995,7 @@
             const rebarPercentage = document.getElementById('rebar_percentage');
             if (rebarPercentage) rebarPercentage.textContent = ((rebarCost / grandTotal) * 100).toFixed(1) + '%';
             const grandTotalPercentage = document.getElementById('grand_total_percentage');
-            if (grandTotalPercentage) grandTotalPercentage.textContent = '100%'; 
+            if (grandTotalPercentage) grandTotalPercentage.textContent = '100%';  
         }
 
         // Function to handle image preview
@@ -3102,7 +3089,7 @@
                 projectName: projectName,
                 totalVolume: totalVolume,
                 grandTotalProject: grandTotalProject, // Still save in IDR internally
-                costPerCubic: costPerCubic,            // Still save in IDR internally
+                costPerCubic: costPerCubic,          // Still save in IDR internally
                 selectedCurrency: selectedCurrencyCode, // Save the currency that was active when saved
                 summaryDetails: breakdownDetails // Directly use the passed breakdownDetails
             };
@@ -3175,7 +3162,7 @@
             // Updated Firestore modular API
             const docRef = window.doc(window.db, `artifacts/${appId}/users/${window.getUserId()}/calculations`, docId);
             try {
-                const docSnap = await window.getDoc(docRef); 
+                const docSnap = await window.getDoc(docRef);  
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     // When viewing details, display costs in the currency that was active when saved if possible,
@@ -3269,10 +3256,10 @@
             const q = window.query(historyCollectionRef); // Query to get all documents for the user
 
             try {
-                const snapshot = await window.getDocs(q); 
+                const snapshot = await window.getDocs(q);  
                 const deletePromises = [];
                 snapshot.forEach((doc) => {
-                    deletePromises.push(window.deleteDoc(doc.ref)); 
+                    deletePromises.push(window.deleteDoc(doc.ref));  
                 });
                 await Promise.all(deletePromises);
                 const messageBox = document.createElement('div');
@@ -3377,7 +3364,7 @@
 
             renderPrinterCards();
             // Select Win Sun and its first option by default
-            selectPrinter(PRINTERS[0].name, 0, 0); 
+            selectPrinter(PRINTERS[0].name, 0, 0);  
             renderMixDesignOptions(); // Render mix design options on load
             updateProjectNameForPrint();
             
@@ -3404,4 +3391,3 @@
     </script>
 </body>
 </html>
-
